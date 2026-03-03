@@ -2,6 +2,7 @@
 #import <Accelerate/Accelerate.h>
 #import <math.h>
 #import "kernels/training/stories_train.h"
+#import "core/checkpoint.h"
 
 // T072 Training Smoke Test
 // Creates synthetic weight blobs in a temp directory, then runs
@@ -222,6 +223,79 @@ static void test_loss_decreases(void) {
     PASS();
 }
 
+static void test_checkpoint_save_load(void) {
+    NSString *wdir = create_synthetic_weights(&kTinyConfig);
+    OrionTrainer *t = orion_trainer_create(&kTinyConfig, wdir.UTF8String);
+    ASSERT(t != NULL, @"trainer should create");
+
+    int s = kTinyConfig.max_seq;
+    int *input = (int *)malloc(s * sizeof(int));
+    int *target = (int *)malloc(s * sizeof(int));
+    for (int i = 0; i < s; i++) {
+        input[i] = i % kTinyConfig.vocab;
+        target[i] = (i + 1) % kTinyConfig.vocab;
+    }
+
+    // Train 3 steps
+    orion_trainer_zero_grads(t);
+    float loss = 0.0f;
+    for (int step = 0; step < 3; step++) {
+        loss = orion_train_step(t, input, target);
+        orion_trainer_adam_update(t);
+    }
+    NSLog(@"  Before checkpoint: step 3, loss=%f, adam_t=%d", loss, t->adam_t);
+
+    // Save checkpoint
+    NSString *ckpt_path = [NSTemporaryDirectory() stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"orion_ckpt_%d.bin", getpid()]];
+    bool saved = orion_checkpoint_save(t, ckpt_path.UTF8String, 3, loss);
+    ASSERT(saved, @"checkpoint save should succeed");
+
+    // Verify file exists and has reasonable size
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:ckpt_path error:nil];
+    unsigned long long size = [attrs fileSize];
+    NSLog(@"  Checkpoint size: %llu bytes", size);
+    ASSERT(size > sizeof(OrionCkptHdr), @"checkpoint should be larger than header");
+
+    // Create a fresh trainer and load the checkpoint
+    OrionTrainer *t2 = orion_trainer_create(&kTinyConfig, wdir.UTF8String);
+    ASSERT(t2 != NULL, @"second trainer should create");
+
+    int loaded_step = 0;
+    float loaded_loss = 0.0f;
+    bool loaded = orion_checkpoint_load(t2, ckpt_path.UTF8String, &loaded_step, &loaded_loss);
+    ASSERT(loaded, @"checkpoint load should succeed");
+    ASSERT(loaded_step == 3, @"loaded step should be 3");
+    ASSERT(fabsf(loaded_loss - loss) < 1e-6f, @"loaded loss should match saved loss");
+    ASSERT(t2->adam_t == t->adam_t, @"adam_t should match");
+    NSLog(@"  Loaded checkpoint: step=%d, loss=%f, adam_t=%d", loaded_step, loaded_loss, t2->adam_t);
+
+    // Verify weights match — spot check first layer wq
+    int d = kTinyConfig.d_model;
+    float diff = 0.0f;
+    for (int i = 0; i < d*d; i++) {
+        diff += fabsf(t->weights[0].wq[i] - t2->weights[0].wq[i]);
+    }
+    ASSERT(diff < 1e-6f, @"restored weights should match original");
+
+    // Train one more step on loaded trainer — should produce same result as original
+    orion_trainer_zero_grads(t);
+    float loss_orig = orion_train_step(t, input, target);
+    orion_trainer_zero_grads(t2);
+    float loss_loaded = orion_train_step(t2, input, target);
+    NSLog(@"  Continue orig loss=%f, loaded loss=%f", loss_orig, loss_loaded);
+    ASSERT(fabsf(loss_orig - loss_loaded) < 1e-4f,
+           @"loss from continued training should match");
+
+    // Cleanup
+    [[NSFileManager defaultManager] removeItemAtPath:ckpt_path error:nil];
+    free(input); free(target);
+    orion_trainer_free(t);
+    orion_trainer_free(t2);
+    cleanup_weights(wdir);
+    PASS();
+}
+
 static void test_gradient_accumulation(void) {
     NSString *wdir = create_synthetic_weights(&kTinyConfig);
     OrionTrainer *t = orion_trainer_create(&kTinyConfig, wdir.UTF8String);
@@ -276,6 +350,7 @@ int main(int argc, const char* argv[]) {
         test_adam_update();
         test_loss_decreases();
         test_gradient_accumulation();
+        test_checkpoint_save_load();
 
         NSLog(@"\n=== Results: %d passed, %d failed ===", g_pass, g_fail);
         return g_fail > 0 ? 1 : 0;

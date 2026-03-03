@@ -98,15 +98,15 @@
 | Single training step | T072 | XL | **DONE** |
 | GCD async dW overlap | T073 | M | **DONE** |
 | Gradient accumulation | T074 | M | **DONE** |
-| Checkpoint save | T075 | L | Pending |
-| Checkpoint resume | T076 | L | Pending |
+| Checkpoint save | T075 | L | **DONE** |
+| Checkpoint resume | T076 | L | **DONE** |
 | exec() restart | T077 | L | Pending |
 | Recompile after Adam | T078 | L | Pending |
 | CLI arg parsing (train) | T079 | M | Pending |
 | Wire orion train E2E | T080 | L | Pending |
 | Training profiler | T081 | S | Pending |
 | Training smoke test | T082 | M | **DONE** |
-| Checkpoint resume test | T083 | M | Pending |
+| Checkpoint resume test | T083 | M | **DONE** |
 
 ### M4 — Weight Swapping
 | Task | ID | Size | Status |
@@ -139,11 +139,11 @@
 - **M0**: 11/11 complete (ALL DONE)
 - **M1**: 35/35 complete (ALL DONE)
 - **M2**: 10/10 complete (ALL DONE)
-- **M3**: 19/27 complete
+- **M3**: 22/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 75/98 complete (0 in progress)
+- **Grand Total**: 78/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log

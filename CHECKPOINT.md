@@ -12,9 +12,9 @@
 - **Session**: 6
 
 ## Current State
-- **Phase**: M3 — Training (19/27 done)
-- **Last completed**: T074 — Gradient accumulation
-- **Next task**: T075 (Checkpoint save)
+- **Phase**: M3 — Training (22/27 done)
+- **Last completed**: T075-T076, T083 — Checkpoint save/load with resume test
+- **Next task**: T077 (exec() restart at compile limit)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Known issues**: ANE compile dominates prefill time (~83%) — program cache (M4) will fix; HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes
@@ -32,6 +32,14 @@
    - `orion_trainer_free` — cleanup all resources
 3. CPU↔ANE data flow uses `io_read_transpose` (ANE [C,S] → CPU [S,C]) and `io_write_transpose` (CPU [S,C] → ANE [C,S])
 4. Backward input assembly uses `orion_tensor_copy_into` for zero-copy fp16 IOSurface region copies
+
+### T075-T076, T083: Checkpoint Save/Load
+1. `core/checkpoint.h` — `OrionCkptHdr` matching ANEgpt format (magic 0x424C5A54, version 2)
+2. `core/checkpoint.m` — binary save/load: header + per-layer weights + Adam state + embed + rms_final
+3. Save: `orion_checkpoint_save` writes all trainer state to file
+4. Load: `orion_checkpoint_load` validates header (magic, version, config match), restores weights + Adam
+5. Test: train 3 steps → save → fresh trainer → load → continue training → identical loss (5.544784)
+6. Checkpoint size: 87MB for 1-layer d=768 vocab=256
 
 ### T073: GCD Async dW Overlap
 1. Replaced inline `orion_cpu_dw_accum` calls with `dispatch_group_async` on serial GCD queue
