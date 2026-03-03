@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M2 — ANE Prefill Inference (IN PROGRESS)** — M1 complete (35/35). ANE milgen kernels working: attention + FFN compile and eval on ANE with real GPT-2 weights. K output matches CPU within 0.0025 error. Next: T049 (final LN + logits), T051 (prompt padding), T052 (prefill runner).
+**M2 — ANE Prefill Inference (IN PROGRESS)** — 8/10 tasks done. Full 12-layer ANE prefill works: "The quick brown fox" → argmax=274 ("jumps"), exact CPU match, 5/5 top-5 overlap. Next: T054 (wire hybrid inference), T055 (golden tests), T056 (benchmark).
 
 ## Milestone Progress
 
@@ -68,11 +68,11 @@
 |------|----|------|--------|
 | MIL GPT-2 attn prefill | T047 | L | **DONE** |
 | MIL GPT-2 FFN prefill | T048 | L | **DONE** |
-| MIL final LN + logits | T049 | M | Pending |
+| MIL final LN + logits | T049 | M | **DONE** |
 | Bucket selection | T050 | S | **DONE** |
-| Prompt padding for ANE | T051 | M | Pending |
-| ANE prefill runner | T052 | XL | Pending |
-| Extract K,V to cache | T053 | M | Pending |
+| Prompt padding for ANE | T051 | M | **DONE** |
+| ANE prefill runner | T052 | XL | **DONE** |
+| Extract K,V to cache | T053 | M | **DONE** |
 | Wire hybrid inference | T054 | L | Pending |
 | ANE golden tests | T055 | M | Pending |
 | Benchmark ANE vs CPU | T056 | S | Pending |
@@ -138,12 +138,12 @@
 ## Task Progress
 - **M0**: 11/11 complete (ALL DONE)
 - **M1**: 35/35 complete (ALL DONE)
-- **M2**: 3/10 complete
+- **M2**: 8/10 complete
 - **M3**: 0/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 49/98 complete (0 in progress)
+- **Grand Total**: 54/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log

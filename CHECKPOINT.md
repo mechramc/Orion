@@ -12,13 +12,13 @@
 - **Session**: 3
 
 ## Current State
-- **Phase**: M2 — ANE Prefill Inference (3/10 tasks done)
-- **Last completed**: T047, T048, T050 — ANE milgen kernels + bucket selection
-- **Next task**: T049 (final LN + logits), T051 (prompt padding), T052 (ANE prefill runner)
+- **Phase**: M2 — ANE Prefill Inference (8/10 tasks done)
+- **Last completed**: T047-T053 — ANE milgen + prefill runner + KV extraction
+- **Next task**: T054 (wire hybrid inference), T055 (ANE golden tests), T056 (benchmark)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Known issues**: ANE minimum tensor size — [1,4,1,4] fails, need [1,256,1,64]+
-- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 27/27
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 31/31
 
 ## What Just Happened (Session 3 — ANE Prefill Kernels)
 
@@ -26,9 +26,13 @@
 1. **T050**: Bucket selection — `orion_select_bucket()` picks smallest bucket ≥ seq_len from {32,64,128,256,512,1024}
 2. **T047**: MIL GPT-2 attention prefill generator — composes mil_builder helpers into complete per-layer attention program with 3 outputs (hidden, K, V for cache). Added `orion_mil_program_multi` for multi-output MIL programs. Added `orion_make_causal_mask_blob` for causal mask generation.
 3. **T048**: MIL GPT-2 FFN prefill generator — LN2 → FC(768→3072) → GELU → Proj(3072→768) → Residual
-4. **Test**: 27/27 pass — bucket selection, attention compile+eval on ANE, FFN compile+eval, combined attn→FFN, ANE vs CPU comparison (K max error 0.0025)
-5. Weight dict convention: blob paths like `@model_path/layer{i}/wq.bin` → loaded from `model/blobs/gpt2_124m/layer{i}/wq.bin`
-6. Only 5 ANE compiles used per test run (well under ~119 limit)
+
+### T049, T051-T053: ANE Prefill Pipeline
+4. **T049**: Final LayerNorm MIL kernel — logits projection done on CPU (wte blob is 73MB, too large for ANE SRAM)
+5. **T051**: Prompt padding — computes wte+wpe embeddings, pads to bucket size, transposes CPU [seq, d_model] → ANE [d_model, bucket]
+6. **T052**: Full ANE prefill runner — compiles 25 programs (12 attn + 12 FFN + 1 final LN), evals sequentially, CPU logits projection via cblas_sgemv
+7. **T053**: K,V extraction — transposes ANE output [d_model, bucket] → CPU [seq, d_model], stores into KV cache with head-split layout
+8. **Test**: 31/31 pass — Full 12-layer ANE prefill: "The quick brown fox" → argmax=274 ("jumps"), exact CPU match, 5/5 top-5 overlap. K max error vs CPU: 0.0025. 30 compiles used.
 
 ---
 
@@ -224,13 +228,11 @@
 
 ## What To Pick Up Next
 
-### Immediate — Continue M2
-**M2 — ANE Prefill** (T049-T056, T047/T048/T050 done):
-1. **T049** (M): Final LayerNorm + logits projection MIL kernel
-2. **T051** (M): Prompt padding + position encoding for bucketed ANE input
-3. **T052** (XL): ANE prefill runner (compile all 12 layers, eval sequentially)
-4. **T053** (M): Extract K,V from ANE into KV cache
-5. **T054** (L): Wire hybrid inference (ANE prefill → CPU decode)
+### Immediate — Complete M2
+**M2 — ANE Prefill** (T054-T056, T047-T053 done):
+1. **T054** (L): Wire hybrid inference (ANE prefill → CPU decode) — update `orion infer` CLI
+2. **T055** (M): ANE golden tests — verify token-exact or top-k match
+3. **T056** (S): Benchmark ANE vs CPU prefill — record speedup
 
 ## Staged But Uncommitted Changes
 None — all changes committed.

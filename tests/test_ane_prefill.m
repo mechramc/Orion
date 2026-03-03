@@ -31,6 +31,8 @@
 #import "model/weight_loader.h"
 #import "kernels/inference/gpt2_prefill_attn.milgen.h"
 #import "kernels/inference/gpt2_prefill_ffn.milgen.h"
+#import "kernels/inference/gpt2_final.milgen.h"
+#import "kernels/inference/prefill_ane.h"
 #import "kernels/inference/decode_cpu.h"
 
 static int g_pass = 0, g_fail = 0;
@@ -428,11 +430,99 @@ static void test_ane_vs_cpu(void) {
     orion_gpt2_weights_free(w);
 }
 
+#pragma mark - Test: Full ANE Prefill E2E (T052)
+
+static void test_full_ane_prefill(void) {
+    printf("\n=== Test: Full ANE Prefill E2E (T052) ===\n");
+
+    OrionGPT2Weights *w = orion_gpt2_weights_load("model/blobs/gpt2_124m");
+    if (!w) {
+        printf("  SKIP: weights not found\n");
+        return;
+    }
+
+    // "The quick brown fox" = [464, 2068, 7586, 21831]
+    int tokens[] = {464, 2068, 7586, 21831};
+    int prompt_len = 4;
+    int vocab = kGPT2_124M.vocab;
+
+    // ANE prefill
+    float *ane_logits = (float *)malloc(vocab * sizeof(float));
+    OrionKVCache *ane_kv = orion_kv_cache_create(&kGPT2_124M);
+
+    bool ok = orion_ane_prefill(w, tokens, prompt_len, &kGPT2_124M,
+                                 "model/blobs/gpt2_124m", ane_kv, ane_logits);
+    CHECK(ok, "ANE prefill completes successfully");
+
+    if (ok) {
+        // CPU reference
+        float *cpu_logits = (float *)malloc(vocab * sizeof(float));
+        OrionKVCache *cpu_kv = orion_kv_cache_create(&kGPT2_124M);
+        orion_gpt2_prefill_kv(w, tokens, prompt_len, cpu_kv, cpu_logits);
+
+        // Compare argmax (top-1 token)
+        int ane_argmax = 0, cpu_argmax = 0;
+        for (int i = 1; i < vocab; i++) {
+            if (ane_logits[i] > ane_logits[ane_argmax]) ane_argmax = i;
+            if (cpu_logits[i] > cpu_logits[cpu_argmax]) cpu_argmax = i;
+        }
+        CHECK(ane_argmax == cpu_argmax,
+              "ANE argmax matches CPU (top-1 agreement)");
+        printf("    ANE argmax=%d, CPU argmax=%d (expected 274='jumps')\n",
+               ane_argmax, cpu_argmax);
+
+        // Compare top-5 overlap
+        int ane_top5[5], cpu_top5[5];
+        float ane_scores[5] = {-1e30f,-1e30f,-1e30f,-1e30f,-1e30f};
+        float cpu_scores[5] = {-1e30f,-1e30f,-1e30f,-1e30f,-1e30f};
+        for (int i = 0; i < vocab; i++) {
+            for (int k = 0; k < 5; k++) {
+                if (ane_logits[i] > ane_scores[k]) {
+                    for (int j = 4; j > k; j--) {
+                        ane_scores[j] = ane_scores[j-1]; ane_top5[j] = ane_top5[j-1];
+                    }
+                    ane_scores[k] = ane_logits[i]; ane_top5[k] = i;
+                    break;
+                }
+            }
+            for (int k = 0; k < 5; k++) {
+                if (cpu_logits[i] > cpu_scores[k]) {
+                    for (int j = 4; j > k; j--) {
+                        cpu_scores[j] = cpu_scores[j-1]; cpu_top5[j] = cpu_top5[j-1];
+                    }
+                    cpu_scores[k] = cpu_logits[i]; cpu_top5[k] = i;
+                    break;
+                }
+            }
+        }
+        int overlap = 0;
+        for (int a = 0; a < 5; a++)
+            for (int c = 0; c < 5; c++)
+                if (ane_top5[a] == cpu_top5[c]) overlap++;
+        CHECK(overlap >= 3, "top-5 overlap >= 3");
+        printf("    Top-5 overlap: %d/5\n", overlap);
+        printf("    ANE top-5: [%d,%d,%d,%d,%d]\n",
+               ane_top5[0], ane_top5[1], ane_top5[2], ane_top5[3], ane_top5[4]);
+        printf("    CPU top-5: [%d,%d,%d,%d,%d]\n",
+               cpu_top5[0], cpu_top5[1], cpu_top5[2], cpu_top5[3], cpu_top5[4]);
+
+        // Check KV cache populated
+        CHECK(ane_kv->current_len == prompt_len, "KV cache len == prompt_len");
+
+        free(cpu_logits);
+        orion_kv_cache_free(cpu_kv);
+    }
+
+    free(ane_logits);
+    orion_kv_cache_free(ane_kv);
+    orion_gpt2_weights_free(w);
+}
+
 #pragma mark - Main
 
 int main(int argc, char **argv) {
     @autoreleasepool {
-        printf("=== Orion ANE Prefill Tests (T047, T048, T050) ===\n");
+        printf("=== Orion ANE Prefill Tests (T047-T052) ===\n");
 
         // T050: bucket selection (no ANE needed)
         test_bucket_selection();
@@ -454,8 +544,11 @@ int main(int argc, char **argv) {
         // Integration: attention → FFN
         test_combined_layer();
 
-        // ANE vs CPU comparison
+        // ANE vs CPU comparison (single layer)
         test_ane_vs_cpu();
+
+        // T052: Full 12-layer ANE prefill E2E
+        test_full_ane_prefill();
 
         printf("\n========================================\n");
         printf("Results: %d passed, %d failed\n", g_pass, g_fail);
