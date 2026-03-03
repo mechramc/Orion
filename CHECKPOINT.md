@@ -9,20 +9,33 @@
 ## Last Updated By
 - **Tool**: Claude Code
 - **Date**: 2026-03-03
-- **Session**: 1 (continued)
+- **Session**: 2
 
 ## Current State
-- **Phase**: M1 — CPU Baseline Inference (16/35 tasks complete)
-- **Last completed**: T027 — Stories110M weight converter (110 files, 208.9 MB fp16)
-- **Next task**: T028 (GPT-2 BPE tokenizer), T031 (GPT-2 weight loading), T032+ (CPU forward pass)
+- **Phase**: M1 — CPU Baseline Inference (22/35 tasks complete)
+- **Last completed**: T031-T036 — CPU GPT-2 forward pass (weight loading + embedding + LayerNorm + attention + FFN + full forward)
+- **Next task**: T028 (GPT-2 BPE tokenizer), T037-T042 (KV cache + decode loop + CLI)
 - **Branch**: `main`
-- **Repo is green**: YES (test_ane_runtime: 11/11 pass)
+- **Repo is green**: YES (all tests pass)
 - **Known issues**: ANE minimum tensor size — [1,4,1,4] fails, need [1,256,1,64]+
-- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6
 
-## What Just Happened (Session 1 continued — M1 Core Runtime)
+## What Just Happened (Session 2 — CPU Forward Pass)
 
-### T027: Stories110M Weight Converter
+### T031-T036: CPU GPT-2 Forward Pass
+1. **T031**: `weight_loader.h/m` — reads 196 BLOBFILE blobs (fp16→fp32), loads all GPT-2 124M weights
+2. **T032**: Token + positional embedding lookup using vDSP_vadd
+3. **T033**: CPU LayerNorm using vDSP (mean, variance, normalize, scale+shift)
+4. **T034**: Multi-head self-attention with explicit causal mask (cblas_sgemm for Q@K^T and scores@V)
+5. **T035**: FFN: Linear → GELU (tanh approx) → Linear using cblas_sgemm
+6. **T036**: Full 12-layer GPT-2 forward pass: embed → 12×(LN→Attn→Residual→LN→FFN→Residual) → final LN → logits
+7. All weight matrices use `CblasTrans` (converter transposes Conv1D [in,out] → blob [out,in])
+8. Test: 6/6 pass — correct argmax for "Hello"→`,`, "The quick brown fox"→`jumps`, "Hello, world"→`!`
+9. Max logit error vs PyTorch: ~0.073 (acceptable fp16 drift across 12 layers)
+
+---
+
+### T027: Stories110M Weight Converter (previous session)
 1. Parses Karpathy's llama2.c binary format (7×int32 header + flat fp32 weights)
 2. Produces 110 blob files: embed + 12 layers × 9 weights + rms_final (208.9 MB fp16)
 3. Config verified: dim=768, hidden=2048, heads=12, seq=1024, vocab=32000
@@ -173,20 +186,18 @@
 ## What To Pick Up Next
 
 ### Immediate — Continue M1
-**MIL Builder Helpers** (T019-T023):
-1. **T019** (M): `orion_mil_linear` — generate MIL for Y = conv(W, X) with BLOBFILE weights
-2. **T020** (M): `orion_mil_layernorm` + `orion_mil_rmsnorm`
-3. **T021** (S): `orion_mil_gelu` + `orion_mil_silu`
-4. **T022** (L): `orion_mil_causal_attention` — decomposed (no SDPA)
-5. **T023** (M): `orion_mil_program` — wrapper to compose ops
-
-**Weight Format** (T024-T027, parallel):
-1. **T024** (M): BLOBFILE writer (128-byte header + fp16 data)
-2. **T025** (M): GPT-2 HF→BLOBFILE converter
-3. **T027** (M): Stories110M converter
-
-**Tokenizer** (T028-T030, parallel):
+**Tokenizer** (T028-T030, parallel with KV cache work):
 1. **T028** (L): GPT-2 BPE tokenizer in Obj-C
+2. **T029** (M): Generate 20 golden test vectors via tiktoken
+3. **T030** (M): Tokenizer golden test runner
+
+**KV Cache + Decode Loop** (T037-T042):
+1. **T037** (M): KV cache store prefill
+2. **T038** (M): KV cache append
+3. **T039** (M): Single-step CPU decode with KV cache
+4. **T040** (M): Token sampling (temperature + top-p)
+5. **T041** (M): CLI arg parsing for infer command
+6. **T042** (L): Wire orion infer E2E (CPU)
 
 ## Staged But Uncommitted Changes
 None — all changes committed.

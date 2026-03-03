@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M1 — CPU Baseline Inference (in progress)** — M0 complete. Core runtime (IOSurface tensors + ANE compile/eval/release) implemented and tested (11/11 pass). Next: MIL builder helpers (T019-T023), weight format (T024-T027), tokenizer (T028-T030).
+**M1 — CPU Baseline Inference (in progress)** — M0 complete. Core runtime, MIL builders, weight converters done. CPU forward pass (T031-T036) implemented and tested — GPT-2 produces correct argmax tokens. Next: tokenizer (T028-T030), KV cache + decode (T037-T042).
 
 ## Milestone Progress
 
@@ -46,12 +46,12 @@
 | GPT-2 BPE tokenizer | T028 | L | Pending |
 | Tokenizer golden vectors | T029 | M | Pending |
 | Tokenizer golden test runner | T030 | M | Pending |
-| GPT-2 weight loading | T031 | M | Pending |
-| Token + positional embedding | T032 | M | Pending |
-| CPU LayerNorm | T033 | M | Pending |
-| CPU attention | T034 | M | Pending |
-| CPU FFN | T035 | M | Pending |
-| CPU GPT-2 full forward | T036 | L | Pending |
+| GPT-2 weight loading | T031 | M | **DONE** |
+| Token + positional embedding | T032 | M | **DONE** |
+| CPU LayerNorm | T033 | M | **DONE** |
+| CPU attention | T034 | M | **DONE** |
+| CPU FFN | T035 | M | **DONE** |
+| CPU GPT-2 full forward | T036 | L | **DONE** |
 | KV cache prefill store | T037 | M | Pending |
 | KV cache append | T038 | M | Pending |
 | CPU single-step decode | T039 | M | Pending |
@@ -137,13 +137,13 @@
 
 ## Task Progress
 - **M0**: 11/11 complete (ALL DONE)
-- **M1**: 16/35 complete
+- **M1**: 22/35 complete
 - **M2**: 0/10 complete
 - **M3**: 0/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 27/98 complete (0 in progress)
+- **Grand Total**: 33/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log
