@@ -11,9 +11,11 @@
 #import "../../../kernels/inference/decode_cpu.h"
 #import "../../../kernels/inference/kv_cache.h"
 #import "../../../kernels/inference/prefill_ane.h"
+#import "../../../kernels/inference/decode_ane.h"
 
 // T041-T042: CLI inference command
 // T054: Wire hybrid inference (ANE prefill → CPU decode)
+// T102: ANE full forward (ANE prefill → ANE decode)
 //
 // Usage: orion infer --prompt "Hello, world" --max_tokens 64 [--ane]
 
@@ -27,7 +29,8 @@ static void print_infer_help(void) {
         "  --temperature FLOAT    Sampling temperature (0=greedy, default: 0.0)\n"
         "  --top_p FLOAT          Top-p nucleus sampling (default: 0.9)\n"
         "  --seed N               RNG seed (default: 42)\n"
-        "  --ane                  Use ANE for prefill (default: CPU only)\n"
+        "  --ane                  Use ANE for prefill + decode (default: CPU only)\n"
+        "  --ane-prefill          Use ANE for prefill only, CPU decode (v2 mode)\n"
         "  --weights PATH         Path to weight blobs directory\n"
         "                         (default: model/blobs/gpt2_124m)\n"
         "  --vocab PATH           Path to vocab.json (default: tokenizer/data/vocab.json)\n"
@@ -50,6 +53,7 @@ int orion_cmd_infer(int argc, const char* argv[]) {
     float top_p = 0.9f;
     uint64_t seed = 42;
     bool use_ane = false;
+    bool ane_decode = false;  // true = ANE decode (v3), false = CPU decode
     const char* weights_path = "model/blobs/gpt2_124m";
     const char* vocab_path = "tokenizer/data/vocab.json";
     const char* merges_path = "tokenizer/data/merges.txt";
@@ -67,6 +71,10 @@ int orion_cmd_infer(int argc, const char* argv[]) {
             seed = strtoull(argv[++i], NULL, 10);
         } else if (strcmp(argv[i], "--ane") == 0) {
             use_ane = true;
+            ane_decode = true;
+        } else if (strcmp(argv[i], "--ane-prefill") == 0) {
+            use_ane = true;
+            ane_decode = false;
         } else if (strcmp(argv[i], "--weights") == 0 && i + 1 < argc) {
             weights_path = argv[++i];
         } else if (strcmp(argv[i], "--vocab") == 0 && i + 1 < argc) {
@@ -161,8 +169,9 @@ int orion_cmd_infer(int argc, const char* argv[]) {
     printf("%s", prompt);
     fflush(stdout);
 
-    // Decode loop (always CPU)
+    // Decode loop
     uint64_t rng_state = seed;
+    fprintf(stderr, "Decoding (%s)...\n", ane_decode ? "ANE" : "CPU");
 
     for (int i = 0; i < max_tokens; i++) {
         int next_token = orion_sample_token(logits, w->vocab, temperature, top_p, &rng_state);
@@ -180,7 +189,16 @@ int orion_cmd_infer(int argc, const char* argv[]) {
 
         // Decode step (timed)
         t0 = time_ms();
-        orion_gpt2_decode_step(w, kv, next_token, logits);
+        if (ane_decode) {
+            bool decode_ok = orion_ane_decode_step(w, kv, next_token, weights_path, logits);
+            if (!decode_ok) {
+                fprintf(stderr, "Warning: ANE decode failed at step %d, falling back to CPU\n", i);
+                ane_decode = false;
+                orion_gpt2_decode_step(w, kv, next_token, logits);
+            }
+        } else {
+            orion_gpt2_decode_step(w, kv, next_token, logits);
+        }
         double decode_ms = time_ms() - t0;
         orion_prof_record_decode(decode_ms);
     }
@@ -190,8 +208,11 @@ int orion_cmd_infer(int argc, const char* argv[]) {
     // Print profiler stats
     OrionPerfMetrics metrics = orion_prof_finish(gen_count, 0);
     metrics.prefill_ms = t_prefill;
+    const char *backend = "CPU";
+    if (use_ane && ane_decode) backend = "ANE full";
+    else if (use_ane) backend = "ANE prefill + CPU decode";
     fprintf(stderr, "\nPrompt tokens: %d, Generated tokens: %d, Backend: %s\n",
-            prompt_len, gen_count, use_ane ? "ANE+CPU" : "CPU");
+            prompt_len, gen_count, backend);
     orion_prof_print(&metrics);
 
     // Cleanup
