@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M4 — Weight Swapping (COMPLETE)** — All 6 tasks done. Program cache (store/lookup), eviction by weights_id, weights_id abstraction, CLI bench swap with 100-iter endurance test (RSS 1.41x, PASS). Next: Phase 8 (ANE Full Forward).
+**Phase 9 — Benchmark Harness (COMPLETE)** — All 4 tasks done (T105-T108). Per-kernel ANE latency profiling, end-to-end inference throughput, training step breakdown, and regression tracking with --save-baseline. Next: Phase 10 (Runtime Abstractions).
 
 ## Milestone Progress
 
@@ -148,10 +148,10 @@
 ### Phase 9 — Benchmark Harness (v3)
 | Task | ID | Size | Status |
 |------|----|------|--------|
-| bench kernels | T105 | M | Pending |
-| bench inference | T106 | M | Pending |
-| bench training | T107 | M | Pending |
-| Benchmark regression tracking | T108 | S | Pending |
+| bench kernels | T105 | M | **DONE** |
+| bench inference | T106 | M | **DONE** |
+| bench training | T107 | M | **DONE** |
+| Benchmark regression tracking | T108 | S | **DONE** |
 
 ### Phase 10 — Runtime Abstractions (v3)
 | Task | ID | Size | Status |

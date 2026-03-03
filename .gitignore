@@ -69,6 +69,9 @@ experiments/spike_single_token
 # Docs (generated logs)
 docs/*.txt
 
+# Benchmark baselines (generated)
+benchmarks/
+
 # Checkpoints
 checkpoints/
 *.ckpt

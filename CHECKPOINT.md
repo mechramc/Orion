@@ -9,17 +9,60 @@
 ## Last Updated By
 - **Tool**: Claude Code
 - **Date**: 2026-03-03
-- **Session**: 8 (M4 Weight Swapping)
+- **Session**: 10 (Phase 9 — Benchmark Harness)
 
 ## Current State
-- **Phase**: Phase 8 complete (95/116 tasks). Next: T105-T108 (Benchmark Harness)
-- **Last completed**: T100-T104 (ANE full forward inference — all done)
-- **Next tasks**: T105 (bench kernels) → T106 (bench inference) → T107 (bench training) → T108 (regression tracking)
+- **Phase**: Phase 9 complete (99/116 tasks). Next: T109-T113 (Runtime Abstractions)
+- **Last completed**: T105-T108 (Benchmark Harness — all done)
+- **Next tasks**: T109 (OrionModel registry) → T110 (OrionKernel) → T111 (OrionRuntime) → T112 (Model registry tests) → T113 (Runtime tests)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Spec version**: ORION_v3_ANE_LLM_SPEC.md (replaces v2)
 - **Known issues**: HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes; ANE multi-output surfaces ordered alphabetically by MIL variable name
 - **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 16/16, test_train_smoke 7/7, test_program_cache 42/42, test_decode_ane 7/7, test_decode_ane_step 3/3, test_infer_golden_ane 4/4
+
+## Session 10 — T105-T108 Benchmark Harness
+
+### T105: `orion bench kernels` (DONE)
+- Added `kernels` subcommand to bench.m — per-kernel ANE latency profiling
+- Benchmarks 5 GPT-2 kernel types: prefill_attn, prefill_ffn, final_ln, decode_proj, decode_ffn
+- All IOSurfaces allocated before timed loop; compile timed separately from eval
+- Reports: compile_ms, eval_min, eval_p50, eval_p90, eval_avg, SRAM estimate per kernel
+- Emits JSONL to stdout per kernel for machine consumption
+- CLI: `orion bench kernels [--model PATH] [--iters 50] [--bucket 64]`
+
+### T106: `orion bench inference` (DONE)
+- Added `inference` subcommand — end-to-end generation throughput benchmark
+- Runs warmup iterations (discarded), then timed prefill + decode loop
+- Three modes: CPU only, ANE prefill + CPU decode (`--ane-prefill`), ANE full (`--ane`)
+- Reports: prefill_ms, decode p50/p90/avg, tok/s, generated count, RSS
+- CLI: `orion bench inference [--prompt "Hello"] [--max_tokens 64] [--warmup 3] [--ane]`
+
+### T107: `orion bench training` (DONE)
+- Added `training` subcommand — training step breakdown with per-phase timing
+- Gracefully skips if Stories110M weights not found (prints clear message, returns 0)
+- Reports per-step: fwd_ms, bwd+dW_ms, adam_ms, total_ms, loss
+- Summary: avg fwd/bwd/adam/recompile/total ms, RSS
+- CLI: `orion bench training [--steps 10] [--grad_accum 4] [--weights PATH]`
+
+### T108: Benchmark Regression Tracking (DONE)
+- Added `--save-baseline` flag to all 4 bench subcommands (swap, kernels, inference, training)
+- Saves metrics as flat key-value JSON to `benchmarks/baseline.json`
+- On runs without --save-baseline, compares current metrics against saved baseline
+- Flags >15% degradation as WARN, shows PASS/WARN/NEW per metric
+- Added `benchmarks/` to .gitignore
+
+### Files Modified
+- `apps/cli/commands/bench.m` — expanded from 262 lines to ~770 lines with all 4 new subcommands
+- `.gitignore` — added `benchmarks/` directory
+
+### Key Design Decisions
+- Weight dict builders duplicated from prefill_ane.m/decode_ane.m (static functions, can't share across TUs)
+- Kernel benchmark uses a struct array + loop instead of macro (avoids label collision issues)
+- Baseline JSON uses NSJSONSerialization with merge-on-save (preserves cross-subcommand baselines)
+- Training benchmark uses approximate 40/60 fwd/bwd split since orion_train_step is monolithic
+
+---
 
 ## Session 9 — T100+T101 ANE Decode MIL + Step
 
