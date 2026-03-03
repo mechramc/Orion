@@ -1,10 +1,173 @@
 #import <Foundation/Foundation.h>
 #import <stdio.h>
+#import <stdlib.h>
+#import <string.h>
+#import <sys/time.h>
+#import "../../../model/weight_loader.h"
+#import "../../../model/configs/gpt2_124m.h"
+#import "../../../tokenizer/gpt2_bpe.h"
+#import "../../../kernels/inference/decode_cpu.h"
+#import "../../../kernels/inference/kv_cache.h"
 
-// TODO(M1): Implement inference command
-// Wiring: tokenizer → ANE prefill (M2) or CPU forward (M1) → CPU decode → sampling
+// T041-T042: CLI inference command
+//
+// Usage: orion infer --prompt "Hello, world" --max_tokens 64
+
+static void print_infer_help(void) {
+    fprintf(stderr,
+        "Usage: orion infer [options]\n"
+        "\n"
+        "Options:\n"
+        "  --prompt TEXT          Input prompt (required)\n"
+        "  --max_tokens N         Maximum tokens to generate (default: 128)\n"
+        "  --temperature FLOAT    Sampling temperature (0=greedy, default: 0.0)\n"
+        "  --top_p FLOAT          Top-p nucleus sampling (default: 0.9)\n"
+        "  --seed N               RNG seed (default: 42)\n"
+        "  --weights PATH         Path to weight blobs directory\n"
+        "                         (default: model/blobs/gpt2_124m)\n"
+        "  --vocab PATH           Path to vocab.json (default: tokenizer/data/vocab.json)\n"
+        "  --merges PATH          Path to merges.txt (default: tokenizer/data/merges.txt)\n"
+        "  --help                 Show this help message\n"
+    );
+}
+
+static double time_ms(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec * 1000.0 + tv.tv_usec / 1000.0;
+}
 
 int orion_cmd_infer(int argc, const char* argv[]) {
-    fprintf(stderr, "orion infer: not yet implemented\n");
-    return 1;
+    // Parse arguments
+    const char* prompt = NULL;
+    int max_tokens = 128;
+    float temperature = 0.0f;
+    float top_p = 0.9f;
+    uint64_t seed = 42;
+    const char* weights_path = "model/blobs/gpt2_124m";
+    const char* vocab_path = "tokenizer/data/vocab.json";
+    const char* merges_path = "tokenizer/data/merges.txt";
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--prompt") == 0 && i + 1 < argc) {
+            prompt = argv[++i];
+        } else if (strcmp(argv[i], "--max_tokens") == 0 && i + 1 < argc) {
+            max_tokens = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--temperature") == 0 && i + 1 < argc) {
+            temperature = atof(argv[++i]);
+        } else if (strcmp(argv[i], "--top_p") == 0 && i + 1 < argc) {
+            top_p = atof(argv[++i]);
+        } else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
+            seed = strtoull(argv[++i], NULL, 10);
+        } else if (strcmp(argv[i], "--weights") == 0 && i + 1 < argc) {
+            weights_path = argv[++i];
+        } else if (strcmp(argv[i], "--vocab") == 0 && i + 1 < argc) {
+            vocab_path = argv[++i];
+        } else if (strcmp(argv[i], "--merges") == 0 && i + 1 < argc) {
+            merges_path = argv[++i];
+        } else if (strcmp(argv[i], "--help") == 0) {
+            print_infer_help();
+            return 0;
+        }
+    }
+
+    if (!prompt) {
+        fprintf(stderr, "Error: --prompt is required\n\n");
+        print_infer_help();
+        return 1;
+    }
+
+    // Load tokenizer
+    fprintf(stderr, "Loading tokenizer...\n");
+    OrionGPT2Tokenizer* tok = orion_gpt2_tokenizer_load(vocab_path, merges_path);
+    if (!tok) {
+        fprintf(stderr, "Error: failed to load tokenizer\n");
+        return 1;
+    }
+
+    // Load weights
+    fprintf(stderr, "Loading weights from %s...\n", weights_path);
+    double t0 = time_ms();
+    OrionGPT2Weights* w = orion_gpt2_weights_load(weights_path);
+    if (!w) {
+        fprintf(stderr, "Error: failed to load weights\n");
+        orion_gpt2_tokenizer_free(tok);
+        return 1;
+    }
+    double t_load = time_ms() - t0;
+    fprintf(stderr, "Weights loaded in %.1f ms\n", t_load);
+
+    // Tokenize prompt
+    int prompt_tokens[1024];
+    int prompt_len = orion_gpt2_encode(tok, prompt, prompt_tokens, 1024);
+    if (prompt_len == 0) {
+        fprintf(stderr, "Error: failed to tokenize prompt\n");
+        orion_gpt2_weights_free(w);
+        orion_gpt2_tokenizer_free(tok);
+        return 1;
+    }
+    fprintf(stderr, "Prompt: \"%s\" → %d tokens\n", prompt, prompt_len);
+
+    // Allocate
+    float* logits = (float*)malloc(w->vocab * sizeof(float));
+    OrionKVCache* kv = orion_kv_cache_create(&kGPT2_124M);
+    int generated[2048];
+    int gen_count = 0;
+
+    // Prefill
+    fprintf(stderr, "Prefilling %d tokens...\n", prompt_len);
+    t0 = time_ms();
+    orion_gpt2_prefill_kv(w, prompt_tokens, prompt_len, kv, logits);
+    double t_prefill = time_ms() - t0;
+    fprintf(stderr, "Prefill: %.1f ms (%.1f ms/token)\n", t_prefill, t_prefill / prompt_len);
+
+    // Print prompt
+    printf("%s", prompt);
+    fflush(stdout);
+
+    // Decode loop
+    uint64_t rng_state = seed;
+    double t_decode_total = 0.0;
+
+    for (int i = 0; i < max_tokens; i++) {
+        int next_token = orion_sample_token(logits, w->vocab, temperature, top_p, &rng_state);
+
+        // Check for EOS (GPT-2 uses <|endoftext|> = 50256)
+        if (next_token == 50256) break;
+
+        generated[gen_count++] = next_token;
+
+        // Print decoded token
+        char* decoded = orion_gpt2_decode(tok, &next_token, 1);
+        if (decoded) {
+            printf("%s", decoded);
+            fflush(stdout);
+            free(decoded);
+        }
+
+        // Decode step
+        t0 = time_ms();
+        orion_gpt2_decode_step(w, kv, next_token, logits);
+        t_decode_total += time_ms() - t0;
+    }
+
+    printf("\n");
+
+    // Stats
+    double ms_per_token = gen_count > 0 ? t_decode_total / gen_count : 0;
+    double tokens_per_sec = ms_per_token > 0 ? 1000.0 / ms_per_token : 0;
+    fprintf(stderr, "\n--- Stats ---\n");
+    fprintf(stderr, "Prompt tokens: %d\n", prompt_len);
+    fprintf(stderr, "Generated tokens: %d\n", gen_count);
+    fprintf(stderr, "Prefill: %.1f ms (%.1f ms/token)\n", t_prefill, t_prefill / prompt_len);
+    fprintf(stderr, "Decode: %.1f ms total (%.1f ms/token, %.1f tok/s)\n",
+            t_decode_total, ms_per_token, tokens_per_sec);
+
+    // Cleanup
+    free(logits);
+    orion_kv_cache_free(kv);
+    orion_gpt2_weights_free(w);
+    orion_gpt2_tokenizer_free(tok);
+
+    return 0;
 }

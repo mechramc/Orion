@@ -12,13 +12,13 @@
 - **Session**: 2
 
 ## Current State
-- **Phase**: M1 — CPU Baseline Inference (25/35 tasks complete)
-- **Last completed**: T028-T030 — GPT-2 BPE tokenizer (20/20 golden tests pass)
-- **Next task**: T037-T042 (KV cache + decode loop + CLI)
+- **Phase**: M1 — CPU Baseline Inference (31/35 tasks complete)
+- **Last completed**: T037-T042 — E2E CPU inference (`orion infer` running GPT-2 124M at 283 tok/s)
+- **Next task**: T043 (inference golden vectors), T044-T046 (profiler)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Known issues**: ANE minimum tensor size — [1,4,1,4] fails, need [1,256,1,64]+
-- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4
 
 ## What Just Happened (Session 2 — CPU Forward Pass)
 
@@ -32,6 +32,17 @@
 7. All weight matrices use `CblasTrans` (converter transposes Conv1D [in,out] → blob [out,in])
 8. Test: 6/6 pass — correct argmax for "Hello"→`,`, "The quick brown fox"→`jumps`, "Hello, world"→`!`
 9. Max logit error vs PyTorch: ~0.073 (acceptable fp16 drift across 12 layers)
+
+### T037-T042: KV Cache + Decode Loop + CLI
+1. **T037**: KV cache store_prefill — rearranges [seq, n_head*head_dim] → [n_head, seq, head_dim] layout
+2. **T038**: KV cache append — writes single position K,V to all heads
+3. **T039**: Single-token decode step using cached K,V + cblas_sgemv for per-head attention
+4. **T040**: Token sampling: argmax (temp=0) + temperature scaling + top-p nucleus sampling (xorshift64 RNG)
+5. **T042**: Full CLI: `orion infer --prompt "..." --max_tokens N --temperature T --top_p P --seed S`
+6. Performance: GPT-2 124M on M4 Max — prefill 3.1 ms/tok, decode 3.5 ms/tok (283 tok/s)
+7. Test: test_decode 4/4 pass (prefill_kv matches forward, decode_step matches prefill, multi-step cross-check)
+
+---
 
 ### T028-T030: GPT-2 BPE Tokenizer
 1. **T028**: Full BPE tokenizer in Obj-C: byte-to-unicode mapping, NSRegularExpression pre-tokenization, iterative BPE merge
@@ -194,13 +205,16 @@
 ## What To Pick Up Next
 
 ### Immediate — Continue M1
-**KV Cache + Decode Loop** (T037-T042):
-1. **T037** (M): KV cache store prefill
-2. **T038** (M): KV cache append
-3. **T039** (M): Single-step CPU decode with KV cache
-4. **T040** (M): Token sampling (temperature + top-p)
-5. **T041** (M): CLI arg parsing for infer command
-6. **T042** (L): Wire orion infer E2E (CPU)
+**Remaining M1** (T043-T046):
+1. **T043** (M): Inference golden vectors (compare multi-token generation to PyTorch)
+2. **T044** (M): Profiler core (timing hooks)
+3. **T045** (S): Profiler print (formatted output)
+4. **T046** (S): Wire profiler to CLI
+
+**M2 — ANE Prefill** (T047-T056):
+1. **T047** (L): MIL GPT-2 attention prefill kernel
+2. **T048** (L): MIL GPT-2 FFN prefill kernel
+3. **T052** (XL): ANE prefill runner (compile + eval sequence)
 
 ## Staged But Uncommitted Changes
 None — all changes committed.

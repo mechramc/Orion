@@ -7,6 +7,17 @@ xcuserdata/
 *.a
 *.dylib
 
+# CLI binary
+/orion
+
+# Test binaries
+tests/test_ane_runtime
+tests/test_mil_builder
+tests/test_cpu_forward
+tests/test_decode
+tests/test_tokenizer
+tests/*.dSYM/
+
 # Weight blobs (large binary files)
 model/blobs/*
 !model/blobs/.gitkeep

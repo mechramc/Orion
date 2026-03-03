@@ -39,6 +39,19 @@ void orion_gpt2_forward_cpu_all(const OrionGPT2Weights* w,
                                  const int* tokens, int seq_len,
                                  float* all_logits);
 
+#pragma mark - Prefill + KV Cache (T037)
+
+/// Run prefill forward pass and populate KV cache.
+/// Returns logits for the last position.
+/// @param w         Loaded GPT-2 weights
+/// @param tokens    Input token ids [seq_len]
+/// @param seq_len   Number of tokens
+/// @param kv        KV cache (will be populated)
+/// @param logits    Output logits buffer [vocab]
+void orion_gpt2_prefill_kv(const OrionGPT2Weights* w,
+                             const int* tokens, int seq_len,
+                             OrionKVCache* kv, float* logits);
+
 #pragma mark - Decode Step (T039)
 
 /// Run a single decode step on CPU using KV cache.

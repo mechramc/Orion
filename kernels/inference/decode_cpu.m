@@ -275,22 +275,209 @@ void orion_gpt2_forward_cpu_all(const OrionGPT2Weights* w,
     free(x); free(ln_out); free(attn_out); free(ffn_out);
 }
 
-#pragma mark - T039: Single-Token Decode (stub for now)
+#pragma mark - T037: Prefill with KV Cache
+
+void orion_gpt2_prefill_kv(const OrionGPT2Weights* w,
+                             const int* tokens, int seq_len,
+                             OrionKVCache* kv, float* logits) {
+    int d = w->d_model;
+    int n_layer = w->n_layer;
+    int n_head = 12;
+    int d_ff = w->d_ff;
+    int vocab = w->vocab;
+
+    float* x = (float*)malloc(seq_len * d * sizeof(float));
+    float* ln_out = (float*)malloc(seq_len * d * sizeof(float));
+    float* attn_out = (float*)malloc(seq_len * d * sizeof(float));
+    float* ffn_out = (float*)malloc(seq_len * d * sizeof(float));
+
+    embed(w, tokens, seq_len, x);
+
+    for (int layer = 0; layer < n_layer; layer++) {
+        const OrionGPT2LayerWeights* l = &w->layers[layer];
+
+        for (int s = 0; s < seq_len; s++) {
+            orion_cpu_layernorm(x + s * d, l->ln1_g, l->ln1_b, d, ln_out + s * d);
+        }
+
+        // Compute Q, K, V and store K, V in cache
+        float* q = (float*)malloc(seq_len * d * sizeof(float));
+        float* k = (float*)malloc(seq_len * d * sizeof(float));
+        float* v = (float*)malloc(seq_len * d * sizeof(float));
+        linear(ln_out, l->wq, l->bq, seq_len, d, d, q);
+        linear(ln_out, l->wk, l->bk, seq_len, d, d, k);
+        linear(ln_out, l->wv, l->bv, seq_len, d, d, v);
+
+        // Store K, V into cache for this layer
+        orion_kv_cache_store_prefill(kv, layer, k, v, seq_len);
+
+        // Run attention using the freshly computed Q, K, V (same as prefill)
+        attention_prefill(l, ln_out, seq_len, n_head, d, attn_out);
+
+        vDSP_vadd(x, 1, attn_out, 1, x, 1, seq_len * d);
+
+        for (int s = 0; s < seq_len; s++) {
+            orion_cpu_layernorm(x + s * d, l->ln2_g, l->ln2_b, d, ln_out + s * d);
+        }
+        ffn(l, ln_out, seq_len, d, d_ff, ffn_out);
+        vDSP_vadd(x, 1, ffn_out, 1, x, 1, seq_len * d);
+
+        free(q); free(k); free(v);
+    }
+
+    for (int s = 0; s < seq_len; s++) {
+        orion_cpu_layernorm(x + s * d, w->ln_f_g, w->ln_f_b, d, x + s * d);
+    }
+
+    // Only compute logits for last position
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+                1, vocab, d,
+                1.0f, x + (seq_len - 1) * d, d, w->wte, d,
+                0.0f, logits, vocab);
+
+    kv->current_len = seq_len;
+
+    free(x); free(ln_out); free(attn_out); free(ffn_out);
+}
+
+#pragma mark - T039: Single-Token Decode with KV Cache
+
+/// Single-head attention for decode: Q[1, head_dim] against cached K,V
+static void attention_decode_head(const float* q_h, const float* k_cache_h,
+                                    const float* v_cache_h, int cache_len,
+                                    int head_dim, int max_seq, float* out_h) {
+    float scale = 1.0f / sqrtf((float)head_dim);
+
+    // scores[cache_len] = Q_h @ K_h^T * scale
+    float* scores = (float*)malloc(cache_len * sizeof(float));
+    cblas_sgemv(CblasRowMajor, CblasNoTrans,
+                cache_len, head_dim,
+                scale, k_cache_h, head_dim, q_h, 1,
+                0.0f, scores, 1);
+
+    // Softmax (no causal mask needed — we attend to all cached positions)
+    float max_val = scores[0];
+    for (int j = 1; j < cache_len; j++) {
+        if (scores[j] > max_val) max_val = scores[j];
+    }
+    float sum = 0.0f;
+    for (int j = 0; j < cache_len; j++) {
+        scores[j] = expf(scores[j] - max_val);
+        sum += scores[j];
+    }
+    for (int j = 0; j < cache_len; j++) {
+        scores[j] /= sum;
+    }
+
+    // out_h[head_dim] = scores[cache_len] @ V_h[cache_len, head_dim]
+    cblas_sgemv(CblasRowMajor, CblasTrans,
+                cache_len, head_dim,
+                1.0f, v_cache_h, head_dim, scores, 1,
+                0.0f, out_h, 1);
+
+    free(scores);
+}
 
 void orion_gpt2_decode_step(const OrionGPT2Weights* w,
                               OrionKVCache* kv,
                               int token,
                               float* logits) {
-    // TODO(T039): Single-token transformer forward pass with KV cache
-    // For now, use prefill with seq_len=kv->current_len+1
-    // This is correct but slow (recomputes all positions)
+    int d = w->d_model;
+    int n_layer = w->n_layer;
+    int n_head = kv->n_head;
+    int head_dim = kv->head_dim;
+    int d_ff = w->d_ff;
+    int vocab = w->vocab;
+    int pos = kv->current_len;
+
+    // x[d_model] — hidden state for single token
+    float* x = (float*)malloc(d * sizeof(float));
+    float* ln_out = (float*)malloc(d * sizeof(float));
+    float* attn_out_full = (float*)malloc(d * sizeof(float));
+    float* ffn_out = (float*)malloc(d * sizeof(float));
+
+    // Embed: wte[token] + wpe[pos]
+    for (int i = 0; i < d; i++) {
+        x[i] = w->wte[token * d + i] + w->wpe[pos * d + i];
+    }
+
+    size_t layer_stride = (size_t)n_head * kv->max_seq * head_dim;
+
+    for (int layer = 0; layer < n_layer; layer++) {
+        const OrionGPT2LayerWeights* l = &w->layers[layer];
+
+        // Pre-attention LayerNorm
+        orion_cpu_layernorm(x, l->ln1_g, l->ln1_b, d, ln_out);
+
+        // Q, K, V projections for single token: [1, d_model] @ [d_model, d_model]^T
+        float* q = (float*)malloc(d * sizeof(float));
+        float* k_new = (float*)malloc(d * sizeof(float));
+        float* v_new = (float*)malloc(d * sizeof(float));
+        linear(ln_out, l->wq, l->bq, 1, d, d, q);
+        linear(ln_out, l->wk, l->bk, 1, d, d, k_new);
+        linear(ln_out, l->wv, l->bv, 1, d, d, v_new);
+
+        // Append K, V to cache
+        orion_kv_cache_append(kv, layer, k_new, v_new);
+
+        // Multi-head attention using cached K, V
+        int cache_len = pos + 1;  // includes current position
+        for (int h = 0; h < n_head; h++) {
+            float* q_h = q + h * head_dim;
+            float* k_cache_h = kv->k_cache + layer * layer_stride + h * kv->max_seq * head_dim;
+            float* v_cache_h = kv->v_cache + layer * layer_stride + h * kv->max_seq * head_dim;
+
+            attention_decode_head(q_h, k_cache_h, v_cache_h, cache_len,
+                                   head_dim, kv->max_seq, attn_out_full + h * head_dim);
+        }
+
+        // Output projection
+        float* proj_out = (float*)malloc(d * sizeof(float));
+        linear(attn_out_full, l->wo, l->bo, 1, d, d, proj_out);
+
+        // Residual
+        vDSP_vadd(x, 1, proj_out, 1, x, 1, d);
+        free(proj_out);
+
+        // Pre-FFN LayerNorm
+        orion_cpu_layernorm(x, l->ln2_g, l->ln2_b, d, ln_out);
+
+        // FFN (single token)
+        ffn(l, ln_out, 1, d, d_ff, ffn_out);
+        vDSP_vadd(x, 1, ffn_out, 1, x, 1, d);
+
+        free(q); free(k_new); free(v_new);
+    }
+
+    // Final LayerNorm
+    orion_cpu_layernorm(x, w->ln_f_g, w->ln_f_b, d, x);
+
+    // Logits
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+                1, vocab, d,
+                1.0f, x, d, w->wte, d,
+                0.0f, logits, vocab);
+
+    kv->current_len = pos + 1;
+
+    free(x); free(ln_out); free(attn_out_full); free(ffn_out);
 }
 
 #pragma mark - T040: Sampling
 
+/// Simple xorshift64 RNG
+static uint64_t xorshift64(uint64_t* state) {
+    uint64_t x = *state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *state = x;
+    return x;
+}
+
 int orion_sample_token(const float* logits, int vocab_size,
                        float temperature, float top_p, uint64_t* rng_state) {
-    // Simple argmax for temp=0
+    // Argmax for temp=0
     if (temperature <= 0.0f) {
         int max_idx = 0;
         float max_val = logits[0];
@@ -302,6 +489,68 @@ int orion_sample_token(const float* logits, int vocab_size,
         }
         return max_idx;
     }
-    // TODO(T040): Full top-p nucleus sampling
-    return 0;
+
+    // Temperature scaling + softmax
+    float* probs = (float*)malloc(vocab_size * sizeof(float));
+    float max_val = logits[0];
+    for (int i = 1; i < vocab_size; i++) {
+        if (logits[i] > max_val) max_val = logits[i];
+    }
+
+    float sum = 0.0f;
+    for (int i = 0; i < vocab_size; i++) {
+        probs[i] = expf((logits[i] - max_val) / temperature);
+        sum += probs[i];
+    }
+    for (int i = 0; i < vocab_size; i++) {
+        probs[i] /= sum;
+    }
+
+    // Top-p (nucleus) sampling
+    // Sort indices by probability descending
+    int* indices = (int*)malloc(vocab_size * sizeof(int));
+    for (int i = 0; i < vocab_size; i++) indices[i] = i;
+
+    // Simple insertion sort on top candidates (sufficient for 50K vocab)
+    for (int i = 1; i < vocab_size; i++) {
+        int key = indices[i];
+        float key_p = probs[key];
+        int j = i - 1;
+        while (j >= 0 && probs[indices[j]] < key_p) {
+            indices[j + 1] = indices[j];
+            j--;
+        }
+        indices[j + 1] = key;
+    }
+
+    // Truncate to top-p cumulative probability
+    float cum = 0.0f;
+    int n_top = 0;
+    for (int i = 0; i < vocab_size; i++) {
+        cum += probs[indices[i]];
+        n_top = i + 1;
+        if (cum >= top_p) break;
+    }
+
+    // Renormalize
+    float norm = 0.0f;
+    for (int i = 0; i < n_top; i++) {
+        norm += probs[indices[i]];
+    }
+
+    // Sample
+    float r = (float)(xorshift64(rng_state) & 0xFFFFFFFF) / 4294967296.0f;
+    float acc = 0.0f;
+    int sampled = indices[0];
+    for (int i = 0; i < n_top; i++) {
+        acc += probs[indices[i]] / norm;
+        if (r < acc) {
+            sampled = indices[i];
+            break;
+        }
+    }
+
+    free(probs);
+    free(indices);
+    return sampled;
 }

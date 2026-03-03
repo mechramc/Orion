@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M1 — CPU Baseline Inference (in progress)** — CPU forward pass + tokenizer done. GPT-2 produces correct argmax tokens, BPE matches tiktoken exactly. Next: KV cache + decode loop + CLI (T037-T046).
+**M1 — CPU Baseline Inference (in progress)** — E2E inference working! `orion infer` runs GPT-2 124M at 283 tok/s on CPU. Tokenizer, forward pass, KV cache, decode loop, sampling, CLI all done. Remaining: golden vectors (T043) + profiler (T044-T046).
 
 ## Milestone Progress
 
@@ -52,12 +52,12 @@
 | CPU attention | T034 | M | **DONE** |
 | CPU FFN | T035 | M | **DONE** |
 | CPU GPT-2 full forward | T036 | L | **DONE** |
-| KV cache prefill store | T037 | M | Pending |
-| KV cache append | T038 | M | Pending |
-| CPU single-step decode | T039 | M | Pending |
-| Token sampling | T040 | M | Pending |
-| CLI arg parsing (infer) | T041 | M | Pending |
-| Wire orion infer E2E (CPU) | T042 | L | Pending |
+| KV cache prefill store | T037 | M | **DONE** |
+| KV cache append | T038 | M | **DONE** |
+| CPU single-step decode | T039 | M | **DONE** |
+| Token sampling | T040 | M | **DONE** |
+| CLI arg parsing (infer) | T041 | M | **DONE** |
+| Wire orion infer E2E (CPU) | T042 | L | **DONE** |
 | Inference golden vectors | T043 | M | Pending |
 | Profiler core | T044 | M | Pending |
 | Profiler print | T045 | S | Pending |
@@ -137,13 +137,13 @@
 
 ## Task Progress
 - **M0**: 11/11 complete (ALL DONE)
-- **M1**: 25/35 complete
+- **M1**: 31/35 complete
 - **M2**: 0/10 complete
 - **M3**: 0/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 36/98 complete (0 in progress)
+- **Grand Total**: 42/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log
