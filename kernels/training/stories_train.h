@@ -152,6 +152,16 @@ void orion_trainer_zero_grads(OrionTrainer* trainer);
 /// Call after accumulating N micro-batches, before Adam update.
 void orion_trainer_scale_grads(OrionTrainer* trainer, float scale);
 
+/// Recompile all ANE programs with current CPU-side weights (Mode A).
+/// Must be called after orion_trainer_adam_update to bake updated weights
+/// into ANE programs. Returns false if any compile fails.
+bool orion_trainer_recompile(OrionTrainer* trainer, const char* weight_path);
+
+/// Check if we're approaching the ANE compile limit (~119 per process).
+/// Returns true if a restart is recommended before the next recompile.
+/// budget_remaining: if non-NULL, set to remaining compiles before limit.
+bool orion_trainer_needs_restart(const OrionTrainer* trainer, int* budget_remaining);
+
 /// Free all trainer resources.
 void orion_trainer_free(OrionTrainer* trainer);
 

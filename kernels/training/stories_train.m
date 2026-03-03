@@ -43,6 +43,116 @@ static void io_write_transpose(IOSurfaceRef surf, const float* in, int channels,
     free(tmp);
 }
 
+// Write fp32 weights as fp16 BLOBFILE to disk.
+static bool save_blob_f32(const char* path, const float* data, int n_elements) {
+    int data_bytes = n_elements * (int)sizeof(_Float16);
+    int total = 128 + data_bytes;
+
+    uint8_t *buf = (uint8_t *)calloc(total, 1);
+    buf[0] = 1; buf[4] = 2;
+    buf[64] = 0xEF; buf[65] = 0xBE; buf[66] = 0xAD; buf[67] = 0xDE;
+    buf[68] = 1;
+    *(uint32_t *)(buf + 72) = data_bytes;
+    *(uint32_t *)(buf + 80) = 128;
+
+    _Float16 *fp16 = (_Float16 *)(buf + 128);
+    for (int i = 0; i < n_elements; i++) {
+        fp16[i] = (_Float16)data[i];
+    }
+
+    NSString *dir = [@(path) stringByDeletingLastPathComponent];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir
+                              withIntermediateDirectories:YES attributes:nil error:nil];
+    NSData *nsdata = [NSData dataWithBytesNoCopy:buf length:total freeWhenDone:YES];
+    return [nsdata writeToFile:@(path) atomically:YES];
+}
+
+// Save all layer weights (forward + transposed) to disk for recompilation.
+static void save_layer_weights(const OrionLayerWeights* w, int layer_idx,
+                                const OrionModelConfig* cfg, const char* base) {
+    int d = cfg->d_model, h = cfg->hidden_dim;
+    char path[512];
+
+    // Forward weights
+    snprintf(path, sizeof(path), "%s/layer%d/rms1.bin", base, layer_idx);
+    save_blob_f32(path, w->rms_att, d);
+    snprintf(path, sizeof(path), "%s/layer%d/wq.bin", base, layer_idx);
+    save_blob_f32(path, w->wq, d*d);
+    snprintf(path, sizeof(path), "%s/layer%d/wk.bin", base, layer_idx);
+    save_blob_f32(path, w->wk, d*d);
+    snprintf(path, sizeof(path), "%s/layer%d/wv.bin", base, layer_idx);
+    save_blob_f32(path, w->wv, d*d);
+    snprintf(path, sizeof(path), "%s/layer%d/wo.bin", base, layer_idx);
+    save_blob_f32(path, w->wo, d*d);
+    snprintf(path, sizeof(path), "%s/layer%d/rms2.bin", base, layer_idx);
+    save_blob_f32(path, w->rms_ffn, d);
+    snprintf(path, sizeof(path), "%s/layer%d/w1.bin", base, layer_idx);
+    save_blob_f32(path, w->w1, h*d);
+    snprintf(path, sizeof(path), "%s/layer%d/w3.bin", base, layer_idx);
+    save_blob_f32(path, w->w3, h*d);
+    snprintf(path, sizeof(path), "%s/layer%d/w2.bin", base, layer_idx);
+    save_blob_f32(path, w->w2, d*h);
+
+    // Transposed weights for backward kernels
+    // For simplicity, we write the same weights transposed in-memory.
+    // The MIL kernels reference e.g. w2t.bin which is W2 transposed.
+    float *tmp = (float *)malloc(h * d * sizeof(float));
+
+    // W2 is [d, h], W2^T is [h, d]
+    for (int r = 0; r < d; r++)
+        for (int c = 0; c < h; c++)
+            tmp[c * d + r] = w->w2[r * h + c];
+    snprintf(path, sizeof(path), "%s/layer%d/w2t.bin", base, layer_idx);
+    save_blob_f32(path, tmp, h * d);
+
+    // W1 is [h, d], W1^T is [d, h]
+    for (int r = 0; r < h; r++)
+        for (int c = 0; c < d; c++)
+            tmp[c * h + r] = w->w1[r * d + c];
+    snprintf(path, sizeof(path), "%s/layer%d/w1t.bin", base, layer_idx);
+    save_blob_f32(path, tmp, d * h);
+
+    // W3 is [h, d], W3^T is [d, h]
+    for (int r = 0; r < h; r++)
+        for (int c = 0; c < d; c++)
+            tmp[c * h + r] = w->w3[r * d + c];
+    snprintf(path, sizeof(path), "%s/layer%d/w3t.bin", base, layer_idx);
+    save_blob_f32(path, tmp, d * h);
+
+    free(tmp);
+    tmp = (float *)malloc(d * d * sizeof(float));
+
+    // Wo^T
+    for (int r = 0; r < d; r++)
+        for (int c = 0; c < d; c++)
+            tmp[c * d + r] = w->wo[r * d + c];
+    snprintf(path, sizeof(path), "%s/layer%d/wot.bin", base, layer_idx);
+    save_blob_f32(path, tmp, d * d);
+
+    // Wq^T
+    for (int r = 0; r < d; r++)
+        for (int c = 0; c < d; c++)
+            tmp[c * d + r] = w->wq[r * d + c];
+    snprintf(path, sizeof(path), "%s/layer%d/wqt.bin", base, layer_idx);
+    save_blob_f32(path, tmp, d * d);
+
+    // Wk^T
+    for (int r = 0; r < d; r++)
+        for (int c = 0; c < d; c++)
+            tmp[c * d + r] = w->wk[r * d + c];
+    snprintf(path, sizeof(path), "%s/layer%d/wkt.bin", base, layer_idx);
+    save_blob_f32(path, tmp, d * d);
+
+    // Wv^T
+    for (int r = 0; r < d; r++)
+        for (int c = 0; c < d; c++)
+            tmp[c * d + r] = w->wv[r * d + c];
+    snprintf(path, sizeof(path), "%s/layer%d/wvt.bin", base, layer_idx);
+    save_blob_f32(path, tmp, d * d);
+
+    free(tmp);
+}
+
 // Build weight dict for a layer's kernel from disk blobs.
 // Each entry: key="@model_path/rel_path" → {offset:0, data:NSData}
 static NSDictionary* load_weight_dict(NSString* base, NSArray<NSString*>* rel_paths) {
@@ -738,4 +848,56 @@ void orion_trainer_adam_update(OrionTrainer* t) {
                         v*d, t->lr, t->beta1, t->beta2, t->eps, t->adam_t);
     orion_cpu_adam_step(t->rms_final, t->drms_final, t->m_rms_final, t->v_rms_final,
                         d, t->lr, t->beta1, t->beta2, t->eps, t->adam_t);
+}
+
+#pragma mark - T078: Recompile After Adam
+
+bool orion_trainer_recompile(OrionTrainer* t, const char* weight_path) {
+    @autoreleasepool {
+        NSString *base = @(weight_path);
+        int nl = t->n_layers;
+
+        // Write updated CPU weights to disk as BLOBFILE
+        for (int L = 0; L < nl; L++) {
+            save_layer_weights(&t->weights[L], L, t->cfg, weight_path);
+        }
+        // Also write embed (needed for causal mask, not weight-bearing in ANE)
+        // Causal mask doesn't change, no need to rewrite.
+
+        // Release old programs and recompile with new weights
+        for (int L = 0; L < nl; L++) {
+            OrionLayerKernels *kern = &t->kernels[L];
+
+            // Release old programs
+            if (kern->fwd_attn)  orion_release_program(kern->fwd_attn);
+            if (kern->fwd_ffn)   orion_release_program(kern->fwd_ffn);
+            if (kern->ffn_bwd)   orion_release_program(kern->ffn_bwd);
+            if (kern->sdpa_bwd1) orion_release_program(kern->sdpa_bwd1);
+            if (kern->sdpa_bwd2) orion_release_program(kern->sdpa_bwd2);
+            if (kern->qkv_bwd)   orion_release_program(kern->qkv_bwd);
+
+            memset(kern, 0, sizeof(OrionLayerKernels));
+
+            // Recompile with updated weights
+            if (!compile_layer(kern, L, t->cfg, base)) {
+                NSLog(@"Recompile failed for layer %d", L);
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
+#pragma mark - T077: Compile Budget Check
+
+bool orion_trainer_needs_restart(const OrionTrainer* t, int* budget_remaining) {
+    int used = orion_compile_count();
+    // 6 programs per layer; need enough budget for one full recompile
+    int needed = t->n_layers * 6;
+    int limit = STORIES_MAX_COMPILES;  // 100 (conservative vs ~119 hard limit)
+    int remaining = limit - used;
+
+    if (budget_remaining) *budget_remaining = remaining;
+    return remaining < needed;
 }

@@ -223,6 +223,47 @@ static void test_loss_decreases(void) {
     PASS();
 }
 
+static void test_recompile_after_adam(void) {
+    NSString *wdir = create_synthetic_weights(&kTinyConfig);
+    OrionTrainer *t = orion_trainer_create(&kTinyConfig, wdir.UTF8String);
+    ASSERT(t != NULL, @"trainer should create");
+
+    int s = kTinyConfig.max_seq;
+    int *input = (int *)malloc(s * sizeof(int));
+    int *target = (int *)malloc(s * sizeof(int));
+    for (int i = 0; i < s; i++) {
+        input[i] = i % kTinyConfig.vocab;
+        target[i] = (i + 1) % kTinyConfig.vocab;
+    }
+
+    // Train 1 step + Adam
+    orion_trainer_zero_grads(t);
+    float loss1 = orion_train_step(t, input, target);
+    orion_trainer_adam_update(t);
+    NSLog(@"  Before recompile: loss=%f", loss1);
+
+    // Recompile with updated weights
+    bool ok = orion_trainer_recompile(t, wdir.UTF8String);
+    ASSERT(ok, @"recompile should succeed");
+
+    // Train another step — loss should still be finite and use new weights
+    orion_trainer_zero_grads(t);
+    float loss2 = orion_train_step(t, input, target);
+    NSLog(@"  After recompile: loss=%f", loss2);
+    ASSERT(isfinite(loss2), @"post-recompile loss should be finite");
+
+    // Check compile budget
+    int remaining = 0;
+    bool needs_restart = orion_trainer_needs_restart(t, &remaining);
+    NSLog(@"  Compile budget: %d remaining, needs_restart=%s",
+          remaining, needs_restart ? "YES" : "NO");
+
+    free(input); free(target);
+    orion_trainer_free(t);
+    cleanup_weights(wdir);
+    PASS();
+}
+
 static void test_checkpoint_save_load(void) {
     NSString *wdir = create_synthetic_weights(&kTinyConfig);
     OrionTrainer *t = orion_trainer_create(&kTinyConfig, wdir.UTF8String);
@@ -350,6 +391,7 @@ int main(int argc, const char* argv[]) {
         test_adam_update();
         test_loss_decreases();
         test_gradient_accumulation();
+        test_recompile_after_adam();
         test_checkpoint_save_load();
 
         NSLog(@"\n=== Results: %d passed, %d failed ===", g_pass, g_fail);

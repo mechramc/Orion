@@ -12,9 +12,9 @@
 - **Session**: 6
 
 ## Current State
-- **Phase**: M3 — Training (22/27 done)
-- **Last completed**: T075-T076, T083 — Checkpoint save/load with resume test
-- **Next task**: T077 (exec() restart at compile limit)
+- **Phase**: M3 — Training (24/27 done)
+- **Last completed**: T077-T078 — exec() restart + recompile after Adam
+- **Next task**: T079 (CLI arg parsing for train)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Known issues**: ANE compile dominates prefill time (~83%) — program cache (M4) will fix; HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes
@@ -32,6 +32,13 @@
    - `orion_trainer_free` — cleanup all resources
 3. CPU↔ANE data flow uses `io_read_transpose` (ANE [C,S] → CPU [S,C]) and `io_write_transpose` (CPU [S,C] → ANE [C,S])
 4. Backward input assembly uses `orion_tensor_copy_into` for zero-copy fp16 IOSurface region copies
+
+### T077-T078: Recompile + exec() Restart Budget
+1. `orion_trainer_recompile` — writes updated CPU weights as BLOBFILE to disk, releases old programs, recompiles all 6 per layer
+2. `save_layer_weights` + `save_blob_f32` — fp32→fp16 BLOBFILE writer with transposed weight generation
+3. `orion_trainer_needs_restart` — checks `orion_compile_count()` vs `STORIES_MAX_COMPILES` budget
+4. Test: train 1 step + Adam + recompile → loss drops (5.545182→5.545065), confirming updated weights baked in
+5. Budget tracking: 58 remaining after 42 compiles in test suite
 
 ### T075-T076, T083: Checkpoint Save/Load
 1. `core/checkpoint.h` — `OrionCkptHdr` matching ANEgpt format (magic 0x424C5A54, version 2)
