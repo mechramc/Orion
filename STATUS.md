@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M1 — CPU Baseline Inference (in progress)** — M0 complete. Core runtime, MIL builders, weight converters done. CPU forward pass (T031-T036) implemented and tested — GPT-2 produces correct argmax tokens. Next: tokenizer (T028-T030), KV cache + decode (T037-T042).
+**M1 — CPU Baseline Inference (in progress)** — CPU forward pass + tokenizer done. GPT-2 produces correct argmax tokens, BPE matches tiktoken exactly. Next: KV cache + decode loop + CLI (T037-T046).
 
 ## Milestone Progress
 
@@ -43,9 +43,9 @@
 | GPT-2 weight converter | T025 | M | **DONE** |
 | Weight conversion tests | T026 | S | **DONE** |
 | Stories weight converter | T027 | M | **DONE** |
-| GPT-2 BPE tokenizer | T028 | L | Pending |
-| Tokenizer golden vectors | T029 | M | Pending |
-| Tokenizer golden test runner | T030 | M | Pending |
+| GPT-2 BPE tokenizer | T028 | L | **DONE** |
+| Tokenizer golden vectors | T029 | M | **DONE** |
+| Tokenizer golden test runner | T030 | M | **DONE** |
 | GPT-2 weight loading | T031 | M | **DONE** |
 | Token + positional embedding | T032 | M | **DONE** |
 | CPU LayerNorm | T033 | M | **DONE** |
@@ -137,13 +137,13 @@
 
 ## Task Progress
 - **M0**: 11/11 complete (ALL DONE)
-- **M1**: 22/35 complete
+- **M1**: 25/35 complete
 - **M2**: 0/10 complete
 - **M3**: 0/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 33/98 complete (0 in progress)
+- **Grand Total**: 36/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log

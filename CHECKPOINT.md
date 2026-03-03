@@ -12,13 +12,13 @@
 - **Session**: 2
 
 ## Current State
-- **Phase**: M1 — CPU Baseline Inference (22/35 tasks complete)
-- **Last completed**: T031-T036 — CPU GPT-2 forward pass (weight loading + embedding + LayerNorm + attention + FFN + full forward)
-- **Next task**: T028 (GPT-2 BPE tokenizer), T037-T042 (KV cache + decode loop + CLI)
+- **Phase**: M1 — CPU Baseline Inference (25/35 tasks complete)
+- **Last completed**: T028-T030 — GPT-2 BPE tokenizer (20/20 golden tests pass)
+- **Next task**: T037-T042 (KV cache + decode loop + CLI)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Known issues**: ANE minimum tensor size — [1,4,1,4] fails, need [1,256,1,64]+
-- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20
 
 ## What Just Happened (Session 2 — CPU Forward Pass)
 
@@ -32,6 +32,14 @@
 7. All weight matrices use `CblasTrans` (converter transposes Conv1D [in,out] → blob [out,in])
 8. Test: 6/6 pass — correct argmax for "Hello"→`,`, "The quick brown fox"→`jumps`, "Hello, world"→`!`
 9. Max logit error vs PyTorch: ~0.073 (acceptable fp16 drift across 12 layers)
+
+### T028-T030: GPT-2 BPE Tokenizer
+1. **T028**: Full BPE tokenizer in Obj-C: byte-to-unicode mapping, NSRegularExpression pre-tokenization, iterative BPE merge
+2. **T029**: 20 golden vectors generated from tiktoken (diverse prompts: contractions, Unicode, whitespace, numbers)
+3. **T030**: Test runner loads golden JSON, verifies encode+decode for all 20 → 20/20 pass
+4. ARC gotcha: `@autoreleasepool` inside encode releases the static regex from `dispatch_once` — removed inner pool
+5. C struct + ObjC objects: must use `void*` + `CFBridgingRetain/Release` (same pattern as ane_runtime.m)
+6. Tokenizer data: `vocab.json` (50257 entries) + `merges.txt` (49992 merges) stored in `tokenizer/data/`
 
 ---
 
@@ -186,11 +194,6 @@
 ## What To Pick Up Next
 
 ### Immediate — Continue M1
-**Tokenizer** (T028-T030, parallel with KV cache work):
-1. **T028** (L): GPT-2 BPE tokenizer in Obj-C
-2. **T029** (M): Generate 20 golden test vectors via tiktoken
-3. **T030** (M): Tokenizer golden test runner
-
 **KV Cache + Decode Loop** (T037-T042):
 1. **T037** (M): KV cache store prefill
 2. **T038** (M): KV cache append

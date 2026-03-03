@@ -32,8 +32,11 @@ venv/
 # Vendor (upstream clones)
 vendor/
 
-# Data
+# Data (training data)
 data/
+
+# Tokenizer data files (small, needed for inference)
+!tokenizer/data/
 
 # Experiments (binaries only, source tracked)
 experiments/*.o

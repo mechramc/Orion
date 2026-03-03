@@ -1,0 +1,194 @@
+[
+  {
+    "text": "Hello, world!",
+    "tokens": [
+      15496,
+      11,
+      995,
+      0
+    ],
+    "decoded": "Hello, world!"
+  },
+  {
+    "text": "The quick brown fox jumps over the lazy dog.",
+    "tokens": [
+      464,
+      2068,
+      7586,
+      21831,
+      18045,
+      625,
+      262,
+      16931,
+      3290,
+      13
+    ],
+    "decoded": "The quick brown fox jumps over the lazy dog."
+  },
+  {
+    "text": "GPT-2 is a transformer model.",
+    "tokens": [
+      38,
+      11571,
+      12,
+      17,
+      318,
+      257,
+      47385,
+      2746,
+      13
+    ],
+    "decoded": "GPT-2 is a transformer model."
+  },
+  {
+    "text": " Hello",
+    "tokens": [
+      18435
+    ],
+    "decoded": " Hello"
+  },
+  {
+    "text": "Hello  ",
+    "tokens": [
+      15496,
+      220,
+      220
+    ],
+    "decoded": "Hello  "
+  },
+  {
+    "text": "  ",
+    "tokens": [
+      220,
+      220
+    ],
+    "decoded": "  "
+  },
+  {
+    "text": "123456789",
+    "tokens": [
+      10163,
+      2231,
+      3134,
+      4531
+    ],
+    "decoded": "123456789"
+  },
+  {
+    "text": "caf\u00e9",
+    "tokens": [
+      66,
+      1878,
+      2634
+    ],
+    "decoded": "caf\u00e9"
+  },
+  {
+    "text": "na\u00efve",
+    "tokens": [
+      2616,
+      38776
+    ],
+    "decoded": "na\u00efve"
+  },
+  {
+    "text": "don't",
+    "tokens": [
+      9099,
+      470
+    ],
+    "decoded": "don't"
+  },
+  {
+    "text": "I'm happy",
+    "tokens": [
+      40,
+      1101,
+      3772
+    ],
+    "decoded": "I'm happy"
+  },
+  {
+    "text": "it's a test",
+    "tokens": [
+      270,
+      338,
+      257,
+      1332
+    ],
+    "decoded": "it's a test"
+  },
+  {
+    "text": "\n\n",
+    "tokens": [
+      628
+    ],
+    "decoded": "\n\n"
+  },
+  {
+    "text": "Hello\nWorld",
+    "tokens": [
+      15496,
+      198,
+      10603
+    ],
+    "decoded": "Hello\nWorld"
+  },
+  {
+    "text": "foo bar baz",
+    "tokens": [
+      21943,
+      2318,
+      275,
+      1031
+    ],
+    "decoded": "foo bar baz"
+  },
+  {
+    "text": "A",
+    "tokens": [
+      32
+    ],
+    "decoded": "A"
+  },
+  {
+    "text": "The",
+    "tokens": [
+      464
+    ],
+    "decoded": "The"
+  },
+  {
+    "text": "a b c d e",
+    "tokens": [
+      64,
+      275,
+      269,
+      288,
+      304
+    ],
+    "decoded": "a b c d e"
+  },
+  {
+    "text": "$100.00",
+    "tokens": [
+      3,
+      3064,
+      13,
+      405
+    ],
+    "decoded": "$100.00"
+  },
+  {
+    "text": "C++ programming is fun!",
+    "tokens": [
+      34,
+      4880,
+      8300,
+      318,
+      1257,
+      0
+    ],
+    "decoded": "C++ programming is fun!"
+  }
+]
