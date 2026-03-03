@@ -35,8 +35,9 @@ vendor/
 # Data
 data/
 
-# Experiments
-experiments/
+# Experiments (binaries only, source tracked)
+experiments/*.o
+experiments/hello_mil
 
 # Docs (generated logs)
 docs/*.txt

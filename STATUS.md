@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M0 — Upstream Validation (Session 1)** — Both upstream repos cloned, built, and validated on M4 Max. Training runs 15 steps successfully with exec() restart. Data + weights downloaded. Remaining: hello MIL (T008) and API docs (T009).
+**M0 — Upstream Validation — COMPLETE** — All 11 tasks done. Both upstreams validated, hello MIL proven on ANE ([1,256,1,64] add: 17.1ms compile, 0.223ms eval), API reference documented. Ready for M1.
 
 ## Milestone Progress
 
@@ -19,8 +19,8 @@
 | Build ANEgpt binaries | T005 | M | **DONE** |
 | Build libane_bridge.dylib | T006 | S | **DONE** |
 | Run ANEgpt train_large | T007 | M | **DONE** |
-| Hello MIL proof-of-concept | T008 | M | Pending |
-| Document ANE API reference | T009 | S | Pending |
+| Hello MIL proof-of-concept | T008 | M | **DONE** |
+| Document ANE API reference | T009 | S | **DONE** |
 | Download TinyStories data | T010 | S | **DONE** |
 | Download Stories110M weights | T011 | S | **DONE** |
 
@@ -136,14 +136,14 @@
 | Hot-swap demo | T098 | L | Pending |
 
 ## Task Progress
-- **M0**: 9/11 complete (T008, T009 remaining)
+- **M0**: 11/11 complete (ALL DONE)
 - **M1**: 0/35 complete
 - **M2**: 0/10 complete
 - **M3**: 0/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 0/94 complete (0 in progress)
+- **Grand Total**: 11/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log
@@ -156,13 +156,14 @@
 | 2026-03-03 | ANEgpt checkpoint format (CkptHdr) | Compatibility with upstream; proven to work |
 
 ## Blockers
-- **None** — Ready to begin M0
+- **None** — M0 complete, ready for M1
 
 ## Risks
 | Risk | Impact | Status |
 |------|--------|--------|
-| Private API breaks on macOS update | All ANE work blocked | Open — will validate in T003/T004 |
-| ~119 compile limit per process | Training requires exec() restart | Open — deferred to M3 |
-| SDPA ignores causal masks | Wrong attention outputs | Open — will validate in T008 |
+| Private API breaks on macOS update | All ANE work blocked | **Validated** — works on macOS 15 / M4 Max |
+| ~119 compile limit per process | Training requires exec() restart | **Validated** — exec() restart works (T004/T007) |
+| SDPA ignores causal masks | Wrong attention outputs | **Confirmed** — must decompose manually (T008 doc) |
+| ANE minimum tensor size | Small tensors fail at eval | **NEW** — [1,4,1,4] fails; [1,256,1,64] works |
 | GPT-2 BPE tokenizer complexity | Large task (T028) | Open — may wrap tiktoken as fallback |
 | fp16 numerical drift | Golden tests may need relaxed tolerance | Open — two-tier tolerance planned |

@@ -12,15 +12,29 @@
 - **Session**: 1 (continued)
 
 ## Current State
-- **Phase**: M0 — Upstream Validation (9/11 tasks complete)
-- **Last completed**: T001-T007, T010, T011 — both upstreams cloned, built, validated; data + weights downloaded
-- **Next task**: T008 (Hello MIL proof-of-concept), T009 (ANE API reference docs)
+- **Phase**: M0 — COMPLETE (11/11 tasks). Ready for M1 (CPU Baseline Inference).
+- **Last completed**: T008 (Hello MIL — PASS), T009 (ANE API reference)
+- **Next task**: M1 — T012 (IOSurface tensor create), T028 (GPT-2 BPE tokenizer, parallel)
 - **Branch**: `main`
-- **Repo is green**: YES (upstream builds verified on M4 Max)
-- **Known issues**: None
-- **Tests passing**: N/A (no Orion tests yet — upstream training validated)
+- **Repo is green**: YES (hello_mil.m passes on ANE)
+- **Known issues**: ANE minimum tensor size — [1,4,1,4] fails, need [1,256,1,64]+
+- **Tests passing**: N/A (no Orion test suite yet)
 
-## What Just Happened (Session 1 continued — M0 Execution)
+## What Just Happened (Session 1 continued — M0 Complete)
+
+### T008: Hello MIL Proof-of-Concept — PASS
+1. Wrote `experiments/hello_mil.m` — standalone program that compiles `z = add(x, y)` on ANE
+2. First attempt with [1,4,1,4] tensors failed (ANE rejects small tensors at eval time)
+3. Increased to [1,256,1,64] — **PASS**: all 16,384 elements correct
+4. Key pattern: fp32 IOSurface I/O with cast to/from fp16 inside MIL
+5. Must pass `@{}` (empty dict) for weights parameter, not `nil`
+6. Compile: 17.1ms, Eval: 0.223ms
+
+### T009: ANE API Reference
+1. Wrote `docs/ane_api_reference.md` — complete API calling sequence
+2. Covers: framework loading, class resolution, 9-step compile→eval pipeline
+3. MIL text format, tensor layout, BLOBFILE format, all key operations
+4. Constraints & gotchas section with verified findings
 
 ### M0 Upstream Validation (T001-T007, T010, T011)
 1. **T001 + T002**: Cloned maderix/ANE and ANEgpt into `vendor/maderix-ane/` and `vendor/anegpt/`
@@ -108,16 +122,16 @@
 
 ## What To Pick Up Next
 
-### Immediate — Finish M0 (2 tasks remaining)
-1. **T008** (M): Hello MIL proof-of-concept — compile trivial MIL program, eval on ANE, read result back → `experiments/hello_mil.m`
-   - This is the **critical path** gate for all M1+ ANE work
-   - Use upstream `ane_runtime.h` patterns from maderix/ANE as reference
-2. **T009** (S): Document ANE API calling sequence → `docs/ane_api_reference.md`
-   - Can run in parallel with T008
+### Immediate — Begin M1 (CPU Baseline Inference)
+1. **T012** (M): IOSurface tensor create — `core/iosurface_tensor.m`
+2. **T013** (S): IOSurface read/write — implement surface_write_f32/read_f32
+3. **T014** (M): fp16↔fp32 NEON conversion — NEON-accelerated cvt functions
+4. **T015** (L): orion_compile_mil — wrap hello_mil pattern into reusable API
+5. **T028** (L): GPT-2 BPE tokenizer — can start in parallel (no deps)
 
-### After M0
-- Begin M1 Phase 1 (core runtime): T012-T018 (IOSurface + ANE runtime)
-- Parallel: T028 (GPT-2 tokenizer — no dependencies)
+### Dependency Chain
+T012 → T013 → T014 → T015 → T016 → T018 (core ANE runtime)
+T028 → T029 → T030 (tokenizer, independent)
 
 ## Staged But Uncommitted Changes
 None — all changes committed.
@@ -125,7 +139,8 @@ None — all changes committed.
 ## Commits This Session
 1. `71119b0` — Initial repo scaffold with full project structure and updated spec
 2. `1e9f330` — Add atomic task list with 94 tasks across 7 phases
-3. `(pending)` — M0 upstream validation: 9/11 tasks complete
+3. `d9fea4a` — M0 upstream validation: 9/11 tasks complete
+4. `(pending)` — M0 complete: hello MIL + API reference (T008, T009)
 
 ## Warnings for Next Session
 - `vendor/` is gitignored — upstream repos must be cloned locally (`git clone` into `vendor/`)
