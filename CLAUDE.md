@@ -55,12 +55,21 @@ xcodebuild -scheme orion -configuration Release
 - Inference: ANE prefill (bucketed) → CPU decode with KV cache
 - Training: ANE forward/backward (dx) → CPU dW + Adam
 
+## Session Tracking
+- **ALWAYS update `STATUS.md` and `CHECKPOINT.md` before committing** — no exceptions
+- `STATUS.md` tracks milestone progress, task completion, decisions, risks
+- `CHECKPOINT.md` is the cross-session handoff document
+- `TASKS.md` has the full 94-task atomic task list with dependencies
+- Update task status in STATUS.md as you complete work
+- Record decisions, blockers, and key findings in both files
+
 ## Do's
 - Always release ANE program objects explicitly after use
 - Use bucketed sequence lengths (32/64/128/256/512/1024)
 - Pin macOS version for reproducible builds
 - Keep ANE work chunky (full prefill/layer ops), CPU for token loops
 - Test weight swap endurance (100+ swaps without restart)
+- Update STATUS.md + CHECKPOINT.md before every commit
 
 ## Don'ts
 - Don't pass causal masks to ANE SDPA (it ignores them)
