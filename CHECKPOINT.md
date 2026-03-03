@@ -12,9 +12,9 @@
 - **Session**: 6
 
 ## Current State
-- **Phase**: M3 — Training (17/27 done)
-- **Last completed**: T072 — Single training step (forward + loss + backward + dW + Adam), T082 — Training smoke test
-- **Next task**: T073 (GCD async dW overlap)
+- **Phase**: M3 — Training (18/27 done)
+- **Last completed**: T073 — GCD async dW overlap
+- **Next task**: T074 (Gradient accumulation)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Known issues**: ANE compile dominates prefill time (~83%) — program cache (M4) will fix; HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes
@@ -32,6 +32,13 @@
    - `orion_trainer_free` — cleanup all resources
 3. CPU↔ANE data flow uses `io_read_transpose` (ANE [C,S] → CPU [S,C]) and `io_write_transpose` (CPU [S,C] → ANE [C,S])
 4. Backward input assembly uses `orion_tensor_copy_into` for zero-copy fp16 IOSurface region copies
+
+### T073: GCD Async dW Overlap
+1. Replaced inline `orion_cpu_dw_accum` calls with `dispatch_group_async` on serial GCD queue
+2. Heap-captured buffers (`c_dh1`, `c_xn`, etc.) for block closure safety, freed inside block
+3. Deferred `dispatch_group_wait` to end of training step (after embedding backward)
+4. Serial queue ensures thread safety on gradient accumulators
+5. Verified identical loss values vs synchronous version (5.545182 → 5.544421)
 
 ### Key Finding: ANE Multi-Output Requires Uniform Buffer Sizes
 - `ANEProgramProcessRequestDirect() Failed with status=0x1d : Program Inference error`

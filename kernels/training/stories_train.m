@@ -3,6 +3,7 @@
 #import <math.h>
 #import <stdlib.h>
 #import <string.h>
+#import <dispatch/dispatch.h>
 
 // T072: Single training step for Stories110M on ANE.
 // Forward (ANE) → Loss (CPU) → Backward (ANE) → dW (CPU)
@@ -513,7 +514,12 @@ float orion_train_step(OrionTrainer* trainer,
 
         // =========================================================
         // 5. BACKWARD PASS (ANE per-layer, reverse order)
+        //    T073: dW cblas_sgemm dispatched async to GCD serial queue.
+        //    Deferred wait before return for maximum ANE/CPU overlap.
         // =========================================================
+        dispatch_queue_t dw_q = dispatch_queue_create("orion.dw_cblas", DISPATCH_QUEUE_SERIAL);
+        dispatch_group_t dw_grp = dispatch_group_create();
+
         for (int L = nl - 1; L >= 0; L--) {
             OrionLayerIO *io = &trainer->io[L];
             OrionLayerKernels *kern = &trainer->kernels[L];
@@ -525,7 +531,6 @@ float orion_train_step(OrionTrainer* trainer,
             // --- FFN Backward ---
             // Assemble input: [dy(d), h1(h), h3(h)] into ffn_bwd_in
             io_write_transpose(io->ffn_bwd_in, dy, d, s);
-            // h1 and h3 from forward taps (already fp16 on IOSurface)
             orion_tensor_copy_into(io->ffn_bwd_in, d,
                                     io->fwd_ffn_out[1], h, s);  // w1_out = h1
             orion_tensor_copy_into(io->ffn_bwd_in, d + h,
@@ -539,25 +544,28 @@ float orion_train_step(OrionTrainer* trainer,
             float *dx_ffn = (float *)malloc(s * d * sizeof(float));
             io_read_transpose(io->ffn_bwd_out[0], dx_ffn, d, s);
 
-            // dW for FFN (CPU): dW2 += gate^T @ dy, dW1 += xn^T @ dh1, dW3 += xn^T @ dh3
+            // dW for FFN — async dispatch to GCD serial queue
             {
-                float *dh1 = (float *)malloc(s * h * sizeof(float));
-                float *dh3 = (float *)malloc(s * h * sizeof(float));
-                float *xn  = (float *)malloc(s * d * sizeof(float));
-                float *gate_act = (float *)malloc(s * h * sizeof(float));
-                io_read_transpose(io->ffn_bwd_out[1], dh1, h, s);
-                io_read_transpose(io->ffn_bwd_out[2], dh3, h, s);
-                io_read_transpose(io->fwd_ffn_out[4], xn, d, s);   // rms2_out
-                io_read_transpose(io->fwd_ffn_out[3], gate_act, h, s);  // gate
+                // Capture buffers (heap copy for block safety)
+                float *c_dh1 = (float *)malloc(s * h * sizeof(float));
+                float *c_dh3 = (float *)malloc(s * h * sizeof(float));
+                float *c_xn  = (float *)malloc(s * d * sizeof(float));
+                float *c_gate = (float *)malloc(s * h * sizeof(float));
+                float *c_dy  = (float *)malloc(s * d * sizeof(float));
+                io_read_transpose(io->ffn_bwd_out[1], c_dh1, h, s);
+                io_read_transpose(io->ffn_bwd_out[2], c_dh3, h, s);
+                io_read_transpose(io->fwd_ffn_out[4], c_xn, d, s);   // rms2_out
+                io_read_transpose(io->fwd_ffn_out[3], c_gate, h, s);  // gate
+                memcpy(c_dy, dy, s * d * sizeof(float));
 
-                // dW2 += gate^T @ dy (gate is [s,h], dy is [s,d]) → [h,d]
-                orion_cpu_dw_accum(gr->dw2, gate_act, dy, s, h, d);
-                // dW1 += xn^T @ dh1 (xn is [s,d], dh1 is [s,h]) → [d,h]
-                orion_cpu_dw_accum(gr->dw1, xn, dh1, s, d, h);
-                // dW3 += xn^T @ dh3
-                orion_cpu_dw_accum(gr->dw3, xn, dh3, s, d, h);
-
-                free(dh1); free(dh3); free(xn); free(gate_act);
+                int c_s = s, c_d = d, c_h = h;
+                float *g_dw2 = gr->dw2, *g_dw1 = gr->dw1, *g_dw3 = gr->dw3;
+                dispatch_group_async(dw_grp, dw_q, ^{
+                    orion_cpu_dw_accum(g_dw2, c_gate, c_dy, c_s, c_h, c_d);
+                    orion_cpu_dw_accum(g_dw1, c_xn, c_dh1, c_s, c_d, c_h);
+                    orion_cpu_dw_accum(g_dw3, c_xn, c_dh3, c_s, c_d, c_h);
+                    free(c_dh1); free(c_dh3); free(c_xn); free(c_gate); free(c_dy);
+                });
             }
 
             // RMSNorm2 backward (CPU)
@@ -575,12 +583,7 @@ float orion_train_step(OrionTrainer* trainer,
                                     io->fwd_attn_out[2], d, s);  // k_out
             orion_tensor_copy_into(io->sdpa_bwd1_in, 2*d,
                                     io->fwd_attn_out[3], d, s);  // v_out
-            io_write_transpose(io->sdpa_bwd1_in, dx2, d, s);
-            // Overwrite channels [3d..4d] with dx2 (transposed)
-            // Actually we need to write at offset 3*d, not overwrite from 0
-            // The io_write_transpose writes from channel 0. Need offset write.
             {
-                // Write dx2 into temp surface, then copy into position
                 IOSurfaceRef tmp = orion_tensor_create(d, s);
                 io_write_transpose(tmp, dx2, d, s);
                 orion_tensor_copy_into(io->sdpa_bwd1_in, 3*d, tmp, d, s);
@@ -605,32 +608,32 @@ float orion_train_step(OrionTrainer* trainer,
             ok = orion_eval(kern->sdpa_bwd2, sdpa2_in, 1, io->sdpa_bwd2_out, 2);
             if (!ok) { NSLog(@"sdpaBwd2 eval failed layer %d", L); free(dy); free(dx2); return -1.0f; }
 
-            // dW for attention (CPU)
+            // dW for attention — async dispatch to GCD serial queue
             {
-                float *xn   = (float *)malloc(s * d * sizeof(float));
-                float *dq   = (float *)malloc(s * d * sizeof(float));
-                float *dk   = (float *)malloc(s * d * sizeof(float));
-                float *dv   = (float *)malloc(s * d * sizeof(float));
-                io_read_transpose(io->fwd_attn_out[5], xn, d, s);  // rms1_out
-                io_read_transpose(io->sdpa_bwd2_out[0], dq, d, s); // dqf
-                io_read_transpose(io->sdpa_bwd2_out[1], dk, d, s); // dkf
-                io_read_transpose(io->sdpa_bwd1_out[0], dv, d, s); // dvf
+                float *c_xn  = (float *)malloc(s * d * sizeof(float));
+                float *c_dq  = (float *)malloc(s * d * sizeof(float));
+                float *c_dk  = (float *)malloc(s * d * sizeof(float));
+                float *c_dv  = (float *)malloc(s * d * sizeof(float));
+                float *c_ao  = (float *)malloc(s * d * sizeof(float));
+                float *c_dx2 = (float *)malloc(s * d * sizeof(float));
+                io_read_transpose(io->fwd_attn_out[5], c_xn, d, s);  // rms1_out
+                io_read_transpose(io->sdpa_bwd2_out[0], c_dq, d, s); // dqf
+                io_read_transpose(io->sdpa_bwd2_out[1], c_dk, d, s); // dkf
+                io_read_transpose(io->sdpa_bwd1_out[0], c_dv, d, s); // dvf
+                io_read_transpose(io->fwd_attn_out[4], c_ao, d, s);  // attn_out
+                memcpy(c_dx2, dx2, s * d * sizeof(float));
 
-                // Read attn_out for dWo
-                float *attn_out = (float *)malloc(s * d * sizeof(float));
-                io_read_transpose(io->fwd_attn_out[4], attn_out, d, s);
-
-                // dWq += xn^T @ dq, dWk += xn^T @ dk, dWv += xn^T @ dv
-                orion_cpu_dw_accum(gr->dwq, xn, dq, s, d, d);
-                orion_cpu_dw_accum(gr->dwk, xn, dk, s, d, d);
-                orion_cpu_dw_accum(gr->dwv, xn, dv, s, d, d);
-                // dWo += attn_out^T @ dx2 (dx2 through Wo means we need the gradient after Wo)
-                // Actually: dWo += attn_out^T @ (Wo^T output's upstream grad)
-                // The upstream gradient for Wo is dx2, which went through sdpaBwd1's Wo^T
-                // So dWo += attn_out^T @ dx2
-                orion_cpu_dw_accum(gr->dwo, attn_out, dx2, s, d, d);
-
-                free(xn); free(dq); free(dk); free(dv); free(attn_out);
+                int c_s = s, c_d = d;
+                float *g_dwq = gr->dwq, *g_dwk = gr->dwk;
+                float *g_dwv = gr->dwv, *g_dwo = gr->dwo;
+                dispatch_group_async(dw_grp, dw_q, ^{
+                    orion_cpu_dw_accum(g_dwq, c_xn, c_dq, c_s, c_d, c_d);
+                    orion_cpu_dw_accum(g_dwk, c_xn, c_dk, c_s, c_d, c_d);
+                    orion_cpu_dw_accum(g_dwv, c_xn, c_dv, c_s, c_d, c_d);
+                    orion_cpu_dw_accum(g_dwo, c_ao, c_dx2, c_s, c_d, c_d);
+                    free(c_xn); free(c_dq); free(c_dk); free(c_dv);
+                    free(c_ao); free(c_dx2);
+                });
             }
 
             // qkvBwd input: [dq(d), dk(d), dv(d)]
@@ -667,6 +670,9 @@ float orion_train_step(OrionTrainer* trainer,
         // =========================================================
         orion_cpu_embedding_bwd(trainer->dembed, dy, input_tokens, d, s);
         free(dy);
+
+        // Deferred wait: all async dW sgemms must complete before return
+        dispatch_group_wait(dw_grp, DISPATCH_TIME_FOREVER);
 
         return loss;
     }
