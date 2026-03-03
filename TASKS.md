@@ -1,6 +1,7 @@
-# Orion v2 — Atomic Task List
+# Orion v3 — Atomic Task List
 
-> Generated from `ORION_v2_ANE_LLM_SPEC.md`. Each task is completable in a single session, independently testable, and tagged with milestone, size, and dependencies.
+> Generated from `ORION_v3_ANE_LLM_SPEC.md`. Each task is completable in a single session, independently testable, and tagged with milestone, size, and dependencies.
+> T001-T098: Original v2 tasks (M0-M6). T099+: v3 additions (ANE full forward, abstractions, benchmarks, roadmap).
 
 ---
 
@@ -478,6 +479,109 @@
 
 ---
 
+## Phase 8 — ANE Full Forward Inference (v3 architecture alignment)
+
+> The v3 spec requires inference to use ANE for the full transformer forward pass (both prefill and decode), not ANE prefill + CPU decode. This phase refactors inference accordingly.
+
+### P8.1 — ANE Single-Token Feasibility Spike
+
+- [ ] **T099** (M) — Spike: Test ANE single-token dispatch latency — compile a GPT-2 forward kernel for seq_len=1 and measure eval time [blocked by: T047, T048]
+  - *Acceptance:* MIL program for seq_len=1 compiles and evals on ANE; measure dispatch overhead vs compute; document whether latency is practical (< 5ms/token)
+  - *Critical:* If single-token fails due to minimum tensor size constraints ([1,4,1,4] threshold), test with small-batch (4-8 tokens)
+  - *Risk mitigation for:* R11 (ANE single-token dispatch overhead)
+  - *File:* `experiments/spike_single_token.m`
+
+### P8.2 — ANE Decode Forward
+
+- [ ] **T100** (L) — Implement MIL generators for single-token ANE forward pass (attention + FFN) with KV cache reads [blocked by: T099, T047, T048]
+  - *Acceptance:* MIL compiles for seq_len=1 (or small batch); output matches CPU decode step within fp16 tolerance
+  - *Note:* KV cache must be passed as IOSurface inputs for K,V history; only new Q projected
+  - *File:* new `kernels/inference/gpt2_decode_ane.milgen.{h,m}`
+
+- [ ] **T101** (L) — Implement ANE decode step: embed token → ANE forward → CPU sampling → append KV cache [blocked by: T100, T038, T040]
+  - *Acceptance:* Given prefilled KV cache + last token, ANE decode step produces correct next-token logits matching CPU decode within fp16 tolerance
+  - *File:* `kernels/inference/prefill_ane.m` or new `kernels/inference/decode_ane.{h,m}`
+
+- [ ] **T102** (L) — Refactor `orion infer` to use ANE full forward: ANE prefill → ANE decode loop (replace CPU decode) [blocked by: T101, T054]
+  - *Acceptance:* `./orion infer --model gpt2_124m --prompt "Hello" --max_new_tokens 50` produces coherent text using ANE for all forward passes; CPU only for sampling
+  - *File:* `apps/cli/commands/infer.m`
+
+- [ ] **T103** (M) — Verify inference golden tests with ANE full forward path [blocked by: T102, T055]
+  - *Acceptance:* All golden tests pass (exact match or top-k fallback for fp16 drift); no regression from hybrid path
+  - *File:* `tests/test_infer_golden.m`
+
+- [ ] **T104** (M) — Benchmark ANE full forward vs hybrid (ANE prefill + CPU decode) [blocked by: T102]
+  - *Acceptance:* Measured tokens/sec for both paths; ANE full forward >= hybrid throughput; results documented
+  - *Record:* Results → `docs/m2_benchmarks.md` (append)
+
+---
+
+## Phase 9 — Benchmark Harness (v3 spec §7)
+
+> The v3 spec requires `orion bench kernels`, `bench inference`, and `bench training` in addition to `bench swap` (M4).
+
+- [ ] **T105** (M) — Implement `orion bench kernels`: per-kernel ANE latency profiling [blocked by: T084]
+  - *Acceptance:* `./orion bench kernels --model stories110m --iters 100` compiles each kernel type, runs N iterations, prints latency table (p50/p90/mean per kernel)
+  - *Metrics:* eval ms, dispatch overhead, SRAM spill flag (estimated working set vs 32MB)
+  - *File:* `apps/cli/commands/bench.m`
+
+- [ ] **T106** (M) — Implement `orion bench inference`: end-to-end inference throughput [blocked by: T102 or T054]
+  - *Acceptance:* `./orion bench inference --model gpt2_124m --prompt "Hello" --max_tokens 64 --warmup 3` prints tokens/sec, p50/p90 per-token, TFLOPS, ANE utilization, RSS
+  - *File:* `apps/cli/commands/bench.m`
+
+- [ ] **T107** (M) — Implement `orion bench training`: training step time breakdown [blocked by: T080]
+  - *Acceptance:* `./orion bench training --model stories110m --steps 10 --grad_accum 4` prints per-phase breakdown (fwd, bwd, dW, Adam, recompile) with TFLOPS
+  - *File:* `apps/cli/commands/bench.m`
+
+- [ ] **T108** (S) — Implement benchmark regression tracking: save baseline metrics to JSON, compare on re-run [blocked by: T105, T106, T107]
+  - *Acceptance:* `./orion bench --save-baseline` writes metrics; subsequent runs compare and flag >15% degradation
+  - *File:* `apps/cli/commands/bench.m` + `benchmarks/baseline.json`
+
+---
+
+## Phase 10 — Runtime Abstractions (v3 spec §5.1)
+
+> Lightweight abstraction layers to make Orion a general ANE model runtime. Not blocking M4-M5, but required before Stage 2 (compiler).
+
+- [ ] **T109** (M) — Implement OrionModel registry: `orion_model_config_load(name)` returns `OrionModelConfig*` from named configs [blocked by: none]
+  - *Acceptance:* `orion_model_config_load("gpt2_124m")` returns GPT-2 config; `orion_model_config_load("stories110m")` returns Stories config; unknown names return NULL
+  - *File:* new `core/model_registry.{h,m}`
+
+- [ ] **T110** (L) — Define OrionKernel interface: struct with generate_mil, compile, eval function pointers [blocked by: T109]
+  - *Acceptance:* Existing GPT-2 attention kernel and Stories fwdAttn kernel can both be wrapped as `OrionKernel` instances; common compile/eval path
+  - *File:* new `core/kernel.{h,m}`
+
+- [ ] **T111** (L) — Define OrionRuntime interface: centralized scheduling, cache, and loop orchestration [blocked by: T110, T084]
+  - *Acceptance:* Both inference and training loops can be expressed through `OrionRuntime` API; existing functionality preserved
+  - *File:* new `core/runtime.{h,m}`
+
+- [ ] **T112** (M) — Refactor GPT-2 inference to use OrionModel + OrionKernel abstractions [blocked by: T110, T111]
+  - *Acceptance:* `orion infer --model gpt2_124m` works identically through abstraction layer; no regression
+  - *File:* `apps/cli/commands/infer.m`, `kernels/inference/`
+
+- [ ] **T113** (M) — Refactor Stories110M training to use OrionModel + OrionKernel abstractions [blocked by: T110, T111]
+  - *Acceptance:* `orion train` works identically through abstraction layer; no regression
+  - *File:* `apps/cli/commands/train.m`, `kernels/training/`
+
+---
+
+## Phase 11 — Build System & Engineering Quality
+
+- [ ] **T114** (M) — Create Makefile with targets: `make`, `make test`, `make bench`, `make clean` [blocked by: none]
+  - *Acceptance:* `make` builds `orion` binary; `make test` builds and runs all 13 test binaries; `make clean` removes all binaries
+  - *Note:* Can replace T090 (deferred from M5) or complement it
+  - *File:* `Makefile`
+
+- [ ] **T115** (S) — Add `-Wall -Wextra` to build flags and fix all warnings [blocked by: T114]
+  - *Acceptance:* Clean build with zero warnings under `-Wall -Wextra`
+  - *File:* `Makefile`
+
+- [ ] **T116** (S) — Consolidate ANE constraints documentation [blocked by: none]
+  - *Acceptance:* `docs/ane_constraints.md` contains all discovered constraints: concat rejection, uniform buffer sizes, minimum tensor size, compile limit, SDPA mask behavior
+  - *File:* `docs/ane_constraints.md`
+
+---
+
 ## Dependency Graph (Critical Path)
 
 ```
@@ -496,17 +600,28 @@ T033 → T034/T035 → T036 → T037 → T038 → T039 → T040
 T012 → T013/T014    T019 → T020/T021/T022/T023    ↓
                       ↓                             ↓
                T047/T048/T049 → T052 → T053 → T054 → T055/T056
-                      ↓
-               T064-T069 → T072 → T073/T074/T075 → T076 → T077
-                                    ↓                        ↓
+                      ↓                               ↓
+               T064-T069 → T072 → T073/T074/T075     T099 → T100 → T101 → T102 → T103/T104
+                                    ↓
+                              T076 → T077
+                                    ↓
                               T078 → T080 → T081/T082/T083
                                        ↓
                               T084 → T085/T086 → T088 → T089
-                                                   ↓
-                                          T090 → T091 → T092 → T093
+                                ↓                  ↓
+                              T105            T090 → T091 → T092 → T093
+                                ↓
+                        T106/T107 → T108
+
+                        T109 → T110 → T111 → T112/T113
+                        T114 → T115
 ```
 
-**Critical path:** T001 → T003 → T004 → T008 → T015 → T016 → T019 → T047 → T052 → T054 (ANE inference) **or** → T064 → T072 → T080 (training)
+**Critical paths:**
+- Training: T001 → T008 → T015 → T019 → T064 → T072 → T080 (DONE)
+- ANE inference (v3): T047 → T099 → T100 → T101 → T102 → T103
+- Weight swapping: T084 → T085 → T088 → T089
+- Benchmarks: T084 → T105 → T106/T107 → T108
 
 ---
 
@@ -524,6 +639,8 @@ T012 → T013/T014    T019 → T020/T021/T022/T023    ↓
 | R8 | IOSurface alignment requirements unknown | Tensor creation fails | Extract from upstream in T008/T009; trial-and-error | T012 |
 | R9 | SRAM spill (>32MB working set) | 30% perf degradation | Profile per-kernel working set; keep under 32MB | T052, T064 |
 | R10 | LoRA-as-input (Mode B) may not be feasible | M6 not achievable | Marked as stretch; T096 is first validation point | T096, T097, T098 |
+| R11 | ANE single-token dispatch overhead | Decode slower than CPU | T099 spike to validate; fallback: small-batch ANE decode (4-8 tokens) | T099, T100, T101 |
+| R12 | ANE minimum tensor size blocks single-token fwd | Cannot run seq_len=1 on ANE | Test in T099; fallback: pad to minimum viable size or batch | T099, T100 |
 
 ---
 
@@ -531,11 +648,11 @@ T012 → T013/T014    T019 → T020/T021/T022/T023    ↓
 
 | Size | Count | Estimated effort per task |
 |------|-------|--------------------------|
-| S | 18 | < 1 hour |
-| M | 52 | 1-3 hours |
-| L | 20 | 3-6 hours |
+| S | 22 | < 1 hour |
+| M | 62 | 1-3 hours |
+| L | 23 | 3-6 hours |
 | XL | 4 | 6-12 hours |
-| **Total** | **94** | |
+| **Total** | **116** | |
 
 ## Phase Summary
 
@@ -549,3 +666,7 @@ T012 → T013/T014    T019 → T020/T021/T022/T023    ↓
 | 5 — Weight Swapping | T084-T089 | M4 | Program cache, swap endurance |
 | 6 — Demo & Polish | T090-T095 | M5 | Build system, SwiftUI app, README, audit |
 | 7 — LoRA Stretch | T096-T098 | M6 | Adapter-as-input hot swap |
+| 8 — ANE Full Forward | T099-T104 | M2.5 | Single-token ANE spike, decode-on-ANE, refactor infer |
+| 9 — Benchmark Harness | T105-T108 | M5+ | bench kernels, inference, training, regression tracking |
+| 10 — Runtime Abstractions | T109-T113 | M5+ | OrionModel, OrionKernel, OrionRuntime interfaces |
+| 11 — Build & Quality | T114-T116 | M5+ | Makefile, warnings, constraint docs |

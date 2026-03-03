@@ -9,18 +9,50 @@
 ## Last Updated By
 - **Tool**: Claude Code
 - **Date**: 2026-03-03
-- **Session**: 7
+- **Session**: 7 (v3 spec alignment)
 
 ## Current State
-- **Phase**: M3 — Training (ALL DONE, 27/27). Next: M4 — Weight Swapping
-- **Last completed**: T079-T081 — CLI train command + profiler
-- **Next task**: T084 (Program cache) — start of M4
+- **Phase**: v3 spec adopted. M0-M3 complete (83/116 tasks). Next: M4 (Weight Swapping) + Phase 8 (ANE Full Forward Inference)
+- **Last completed**: T079-T081 — CLI train command + profiler; v3 spec + design review + 18 new tasks
+- **Next tasks**: T084 (Program cache) and T099 (ANE single-token spike) — can proceed in parallel
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
-- **Known issues**: ANE compile dominates prefill time (~83%) — program cache (M4) will fix; HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes
+- **Spec version**: ORION_v3_ANE_LLM_SPEC.md (replaces v2)
+- **Known issues**: ANE compile dominates prefill time (~83%) — program cache (M4) will fix; HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes; ANE single-token dispatch latency unknown (T099 will validate)
 - **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 16/16, test_train_smoke 7/7
 
-## What Just Happened (Session 7 — M3 Completion)
+## What Just Happened (Session 7 — M3 Completion + v3 Spec Alignment)
+
+### v3 Specification Update
+1. Created `ORION_v3_ANE_LLM_SPEC.md` (927 lines) — three major changes:
+   - **CHANGE 1**: Inference architecture → "ANE full forward pass with CPU sampling loop" (replaces ANE prefill + CPU decode)
+   - **CHANGE 2**: Runtime abstraction layers (OrionKernel, OrionModel, OrionRuntime) — GPT-2/Stories as reference impls
+   - **CHANGE 3**: Expanded benchmark harness (bench kernels, inference, training, swap)
+   - **Added**: Project Evolution Roadmap — Stage 1 (Core) → Stage 2 (Compiler/auto-tune) → Stage 3 (Platform)
+2. Created `ORION_DESIGN_REVIEW.md` (370 lines) — gap analysis against v3 spec:
+   - 3 critical gaps: inference architecture, program cache, benchmark harness
+   - 7 risk areas assessed; 2 new risks added (R11: single-token dispatch, R12: minimum tensor size)
+   - 8-phase implementation roadmap aligned with v3
+3. Added 18 new tasks (T099-T116) across 4 new phases:
+   - Phase 8: ANE Full Forward Inference (T099-T104) — spike → MIL generators → refactor infer
+   - Phase 9: Benchmark Harness (T105-T108) — bench kernels/inference/training + regression
+   - Phase 10: Runtime Abstractions (T109-T113) — OrionModel, OrionKernel, OrionRuntime
+   - Phase 11: Build & Quality (T114-T116) — Makefile, warnings, constraints doc
+4. Updated TASKS.md (v2 → v3), STATUS.md, CHECKPOINT.md with new direction
+
+### Risk Mitigations Planned
+- **R11 (ANE single-token dispatch)**: T099 spike will test seq_len=1 dispatch latency. If too slow, fallback: small-batch ANE decode (4-8 tokens per dispatch)
+- **R12 (ANE minimum tensor size)**: T099 will test minimum viable tensor dimensions. If seq_len=1 fails, pad to minimum ANE-compatible size
+- **Compile budget**: Program cache (T084) is critical to avoid recompilation during inference and training weight swaps
+- **Memory leaks**: Swap endurance test (T088) validates cache eviction doesn't leak
+
+### Execution Priority (recommended order)
+1. T084-T089 (M4 — Weight Swapping) — unblocks everything
+2. T099 (ANE single-token spike) — validates v3 inference architecture feasibility
+3. T114 (Makefile) — reproducible builds
+4. T100-T104 (ANE full forward) — depends on T099 outcome
+5. T105-T108 (Benchmark harness) — depends on T084
+6. T109-T113 (Runtime abstractions) — can be incremental
 
 ### T079-T080: CLI Train Command
 1. Rewrote `apps/cli/commands/train.m` — full E2E training command
@@ -355,14 +387,24 @@
 
 ## What To Pick Up Next
 
-### Immediate — Start M4 (Weight Swapping)
-**M4 — Weight Swapping** (T084-T089, 0/6 done):
-1. **T084** (L): Program cache — cache compiled ANE programs to avoid recompilation
-2. **T085** (M): Cache eviction — LRU/LFU eviction when cache exceeds budget
-3. **T086** (M): weights_id abstraction — unique identifier for weight sets
+### Priority 1 — M4 Weight Swapping (T084-T089)
+Program cache is the highest-priority unblocked work. It unblocks benchmarks (T105) and is required for production training and inference.
+1. **T084** (L): Program cache — `orion_get_or_compile` with composite key
+2. **T085** (M): Cache eviction — LRU with safe ObjC release
+3. **T086** (M): weights_id abstraction — step-based for training, named for inference
 4. **T087** (M): CLI bench swap args
 5. **T088** (XL): Swap endurance test — 100 alternations, no memory leak
 6. **T089** (S): Wire bench swap CLI
+
+### Priority 2 — ANE Single-Token Spike (T099)
+Can run in parallel with M4. Validates whether v3 inference architecture is feasible.
+- **T099** (M): Compile GPT-2 forward for seq_len=1, measure ANE eval latency
+- If passes → proceed with T100-T104 (ANE full forward inference)
+- If fails → document constraint, keep hybrid architecture as production path
+
+### Priority 3 — Build System (T114)
+Quick win that makes everything else easier.
+- **T114** (M): Makefile with `make`, `make test`, `make bench`, `make clean`
 
 ## Staged But Uncommitted Changes
 None — all changes committed.

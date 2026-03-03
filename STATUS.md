@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M3 — Training (COMPLETE)** — All 27 tasks done. CPU ops, ANE kernels, gradient accumulation, checkpointing, recompile, CLI E2E, profiler. Next: M4 Weight Swapping.
+**M3 — Training (COMPLETE)** — All 27 tasks done. v3 spec adopted: ANE full forward inference, runtime abstractions, expanded benchmarks. Next: M4 Weight Swapping + Phase 8 (ANE Full Forward).
 
 ## Milestone Progress
 
@@ -135,6 +135,40 @@
 | LoRA adapter loading | T097 | M | Pending |
 | Hot-swap demo | T098 | L | Pending |
 
+### Phase 8 — ANE Full Forward Inference (v3)
+| Task | ID | Size | Status |
+|------|----|------|--------|
+| ANE single-token spike | T099 | M | Pending |
+| ANE decode forward MIL | T100 | L | Pending |
+| ANE decode step | T101 | L | Pending |
+| Refactor infer to ANE full | T102 | L | Pending |
+| Golden tests (ANE full) | T103 | M | Pending |
+| Benchmark ANE full vs hybrid | T104 | M | Pending |
+
+### Phase 9 — Benchmark Harness (v3)
+| Task | ID | Size | Status |
+|------|----|------|--------|
+| bench kernels | T105 | M | Pending |
+| bench inference | T106 | M | Pending |
+| bench training | T107 | M | Pending |
+| Benchmark regression tracking | T108 | S | Pending |
+
+### Phase 10 — Runtime Abstractions (v3)
+| Task | ID | Size | Status |
+|------|----|------|--------|
+| OrionModel registry | T109 | M | Pending |
+| OrionKernel interface | T110 | L | Pending |
+| OrionRuntime interface | T111 | L | Pending |
+| Refactor inference to abstractions | T112 | M | Pending |
+| Refactor training to abstractions | T113 | M | Pending |
+
+### Phase 11 — Build & Quality (v3)
+| Task | ID | Size | Status |
+|------|----|------|--------|
+| Makefile | T114 | M | Pending |
+| -Wall -Wextra clean build | T115 | S | Pending |
+| ANE constraints doc | T116 | S | Pending |
+
 ## Task Progress
 - **M0**: 11/11 complete (ALL DONE)
 - **M1**: 35/35 complete (ALL DONE)
@@ -143,8 +177,12 @@
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 83/98 complete (0 in progress)
-- **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
+- **Phase 8 (ANE Full Forward)**: 0/6 complete
+- **Phase 9 (Benchmarks)**: 0/4 complete
+- **Phase 10 (Abstractions)**: 0/5 complete
+- **Phase 11 (Build Quality)**: 0/3 complete
+- **Grand Total**: 83/116 complete (0 in progress)
+- **Critical paths**: Training DONE | ANE inference v3: T099→T102 | Weight swap: T084→T089
 
 ## Decisions Log
 | Date | Decision | Rationale |
@@ -156,9 +194,13 @@
 | 2026-03-03 | ANEgpt checkpoint format (CkptHdr) | Compatibility with upstream; proven to work |
 | 2026-03-03 | Multi-output instead of concat for training kernels | ANE compiler rejects concat along axis=1; multi-output via orion_mil_program_multi works |
 | 2026-03-03 | Uniform output IOSurface sizes for multi-output ANE programs | ANE eval fails with status 0x1d if output buffers differ in size; pad all to max |
+| 2026-03-03 | v3 spec: ANE full forward inference | Replace ANE prefill + CPU decode with ANE full forward + CPU sampling; better ANE demo |
+| 2026-03-03 | v3 spec: Runtime abstraction layers | OrionKernel, OrionModel, OrionRuntime; GPT-2/Stories are reference impls |
+| 2026-03-03 | v3 spec: Expanded benchmark harness | bench kernels, inference, training, swap; SRAM spill detection |
+| 2026-03-03 | v3 spec: Project evolution roadmap | Stage 1 (Core) → Stage 2 (Compiler/auto-tune) → Stage 3 (Platform) |
 
 ## Blockers
-- **None** — M0 complete, ready for M1
+- **None** — M3 complete, M4 and Phase 8 ready to start
 
 ## Risks
 | Risk | Impact | Status |
@@ -166,7 +208,9 @@
 | Private API breaks on macOS update | All ANE work blocked | **Validated** — works on macOS 15 / M4 Max |
 | ~119 compile limit per process | Training requires exec() restart | **Validated** — exec() restart works (T004/T007) |
 | SDPA ignores causal masks | Wrong attention outputs | **Confirmed** — must decompose manually (T008 doc) |
-| ANE minimum tensor size | Small tensors fail at eval | **NEW** — [1,4,1,4] fails; [1,256,1,64] works |
+| ANE minimum tensor size | Small tensors fail at eval | **Known** — [1,4,1,4] fails; [1,256,1,64] works |
 | ANE multi-output buffer sizes | Mixed-size outputs fail eval | **SOLVED** — pad all output IOSurfaces to max size |
-| GPT-2 BPE tokenizer complexity | Large task (T028) | Open — may wrap tiktoken as fallback |
-| fp16 numerical drift | Golden tests may need relaxed tolerance | Open — two-tier tolerance planned |
+| GPT-2 BPE tokenizer complexity | Large task (T028) | **SOLVED** — T028 done |
+| fp16 numerical drift | Golden tests may need relaxed tolerance | **Managed** — two-tier tolerance in golden tests |
+| ANE single-token dispatch overhead | Decode-on-ANE may be slower than CPU | **NEW** — T099 spike will validate; fallback: small-batch decode |
+| ANE minimum tensor size blocks decode | seq_len=1 may not work on ANE | **NEW** — T099 spike will test; fallback: pad to minimum viable size |
