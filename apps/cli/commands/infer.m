@@ -3,6 +3,7 @@
 #import <stdlib.h>
 #import <string.h>
 #import <sys/time.h>
+#import "../../../core/profiler.h"
 #import "../../../model/weight_loader.h"
 #import "../../../model/configs/gpt2_124m.h"
 #import "../../../tokenizer/gpt2_bpe.h"
@@ -111,8 +112,10 @@ int orion_cmd_infer(int argc, const char* argv[]) {
     // Allocate
     float* logits = (float*)malloc(w->vocab * sizeof(float));
     OrionKVCache* kv = orion_kv_cache_create(&kGPT2_124M);
-    int generated[2048];
     int gen_count = 0;
+
+    // Start profiler
+    orion_prof_begin();
 
     // Prefill
     fprintf(stderr, "Prefilling %d tokens...\n", prompt_len);
@@ -127,15 +130,12 @@ int orion_cmd_infer(int argc, const char* argv[]) {
 
     // Decode loop
     uint64_t rng_state = seed;
-    double t_decode_total = 0.0;
 
     for (int i = 0; i < max_tokens; i++) {
         int next_token = orion_sample_token(logits, w->vocab, temperature, top_p, &rng_state);
 
-        // Check for EOS (GPT-2 uses <|endoftext|> = 50256)
-        if (next_token == 50256) break;
-
-        generated[gen_count++] = next_token;
+        if (next_token == 50256) break;  // EOS
+        gen_count++;
 
         // Print decoded token
         char* decoded = orion_gpt2_decode(tok, &next_token, 1);
@@ -145,23 +145,20 @@ int orion_cmd_infer(int argc, const char* argv[]) {
             free(decoded);
         }
 
-        // Decode step
+        // Decode step (timed)
         t0 = time_ms();
         orion_gpt2_decode_step(w, kv, next_token, logits);
-        t_decode_total += time_ms() - t0;
+        double decode_ms = time_ms() - t0;
+        orion_prof_record_decode(decode_ms);
     }
 
     printf("\n");
 
-    // Stats
-    double ms_per_token = gen_count > 0 ? t_decode_total / gen_count : 0;
-    double tokens_per_sec = ms_per_token > 0 ? 1000.0 / ms_per_token : 0;
-    fprintf(stderr, "\n--- Stats ---\n");
-    fprintf(stderr, "Prompt tokens: %d\n", prompt_len);
-    fprintf(stderr, "Generated tokens: %d\n", gen_count);
-    fprintf(stderr, "Prefill: %.1f ms (%.1f ms/token)\n", t_prefill, t_prefill / prompt_len);
-    fprintf(stderr, "Decode: %.1f ms total (%.1f ms/token, %.1f tok/s)\n",
-            t_decode_total, ms_per_token, tokens_per_sec);
+    // Print profiler stats
+    OrionPerfMetrics metrics = orion_prof_finish(gen_count, 0);
+    metrics.prefill_ms = t_prefill;
+    fprintf(stderr, "\nPrompt tokens: %d, Generated tokens: %d\n", prompt_len, gen_count);
+    orion_prof_print(&metrics);
 
     // Cleanup
     free(logits);

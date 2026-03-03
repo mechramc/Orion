@@ -12,13 +12,13 @@
 - **Session**: 2
 
 ## Current State
-- **Phase**: M1 — CPU Baseline Inference (31/35 tasks complete)
-- **Last completed**: T037-T042 — E2E CPU inference (`orion infer` running GPT-2 124M at 283 tok/s)
-- **Next task**: T043 (inference golden vectors), T044-T046 (profiler)
+- **Phase**: M2 — ANE Prefill Inference (M1 complete, 35/35)
+- **Last completed**: T043-T046 — Inference golden vectors + profiler (M1 COMPLETE)
+- **Next task**: T047-T056 (ANE GPT-2 prefill kernels + hybrid inference)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Known issues**: ANE minimum tensor size — [1,4,1,4] fails, need [1,256,1,64]+
-- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3
 
 ## What Just Happened (Session 2 — CPU Forward Pass)
 
@@ -32,6 +32,14 @@
 7. All weight matrices use `CblasTrans` (converter transposes Conv1D [in,out] → blob [out,in])
 8. Test: 6/6 pass — correct argmax for "Hello"→`,`, "The quick brown fox"→`jumps`, "Hello, world"→`!`
 9. Max logit error vs PyTorch: ~0.073 (acceptable fp16 drift across 12 layers)
+
+### T043-T046: Golden Vectors + Profiler
+1. **T043**: Inference golden test — 5-token greedy generation matches PyTorch exactly, determinism verified
+2. **T044**: Profiler core — p50/p90 percentile computation, RSS tracking, TFLOPS calculation
+3. **T045**: Profiler print — formatted table output to stderr
+4. **T046**: Wired into CLI — `orion infer` now prints profiler stats after generation
+
+---
 
 ### T037-T042: KV Cache + Decode Loop + CLI
 1. **T037**: KV cache store_prefill — rearranges [seq, n_head*head_dim] → [n_head, seq, head_dim] layout
@@ -205,12 +213,6 @@
 ## What To Pick Up Next
 
 ### Immediate — Continue M1
-**Remaining M1** (T043-T046):
-1. **T043** (M): Inference golden vectors (compare multi-token generation to PyTorch)
-2. **T044** (M): Profiler core (timing hooks)
-3. **T045** (S): Profiler print (formatted output)
-4. **T046** (S): Wire profiler to CLI
-
 **M2 — ANE Prefill** (T047-T056):
 1. **T047** (L): MIL GPT-2 attention prefill kernel
 2. **T048** (L): MIL GPT-2 FFN prefill kernel

@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M1 — CPU Baseline Inference (in progress)** — E2E inference working! `orion infer` runs GPT-2 124M at 283 tok/s on CPU. Tokenizer, forward pass, KV cache, decode loop, sampling, CLI all done. Remaining: golden vectors (T043) + profiler (T044-T046).
+**M1 — CPU Baseline Inference (COMPLETE)** — All 35 tasks done. `orion infer` runs GPT-2 124M at 283 tok/s on CPU with profiler. Ready for M2 (ANE prefill). Next: T047-T056.
 
 ## Milestone Progress
 
@@ -58,10 +58,10 @@
 | Token sampling | T040 | M | **DONE** |
 | CLI arg parsing (infer) | T041 | M | **DONE** |
 | Wire orion infer E2E (CPU) | T042 | L | **DONE** |
-| Inference golden vectors | T043 | M | Pending |
-| Profiler core | T044 | M | Pending |
-| Profiler print | T045 | S | Pending |
-| Wire profiler to CLI | T046 | S | Pending |
+| Inference golden vectors | T043 | M | **DONE** |
+| Profiler core | T044 | M | **DONE** |
+| Profiler print | T045 | S | **DONE** |
+| Wire profiler to CLI | T046 | S | **DONE** |
 
 ### M2 — ANE Prefill Inference
 | Task | ID | Size | Status |
@@ -137,13 +137,13 @@
 
 ## Task Progress
 - **M0**: 11/11 complete (ALL DONE)
-- **M1**: 31/35 complete
+- **M1**: 35/35 complete (ALL DONE)
 - **M2**: 0/10 complete
 - **M3**: 0/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 42/98 complete (0 in progress)
+- **Grand Total**: 46/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log
