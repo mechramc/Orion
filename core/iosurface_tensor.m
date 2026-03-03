@@ -111,6 +111,52 @@ void orion_tensor_read_f32_direct(IOSurfaceRef surface, float* data, int count) 
     IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, NULL);
 }
 
+#pragma mark - Region Copy
+
+void orion_tensor_copy_into(IOSurfaceRef dst, int dst_ch_offset,
+                             IOSurfaceRef src, int channels, int seq_len) {
+    if (!dst || !src || channels <= 0 || seq_len <= 0) return;
+
+    size_t elem_count = (size_t)channels * seq_len;
+    size_t byte_count = elem_count * sizeof(_Float16);
+    size_t dst_offset = (size_t)dst_ch_offset * seq_len * sizeof(_Float16);
+
+    IOSurfaceLock(src, kIOSurfaceLockReadOnly, NULL);
+    IOSurfaceLock(dst, 0, NULL);
+
+    const void *src_ptr = IOSurfaceGetBaseAddress(src);
+    void *dst_ptr = (uint8_t *)IOSurfaceGetBaseAddress(dst) + dst_offset;
+    memcpy(dst_ptr, src_ptr, byte_count);
+
+    IOSurfaceUnlock(dst, 0, NULL);
+    IOSurfaceUnlock(src, kIOSurfaceLockReadOnly, NULL);
+}
+
+void orion_tensor_write_f32_at(IOSurfaceRef dst, int dst_ch_offset,
+                                const float* data, int channels, int seq_len) {
+    if (!dst || !data || channels <= 0 || seq_len <= 0) return;
+
+    int count = channels * seq_len;
+    size_t dst_offset = (size_t)dst_ch_offset * seq_len * sizeof(_Float16);
+
+    IOSurfaceLock(dst, 0, NULL);
+    _Float16 *dst_ptr = (_Float16 *)((uint8_t *)IOSurfaceGetBaseAddress(dst) + dst_offset);
+
+    // NEON f32 → f16 conversion
+    int i = 0;
+    for (; i + 7 < count; i += 8) {
+        float16x8_t h = vcombine_f16(
+            vcvt_f16_f32(vld1q_f32(data + i)),
+            vcvt_f16_f32(vld1q_f32(data + i + 4)));
+        vst1q_f16((__fp16 *)(dst_ptr + i), h);
+    }
+    for (; i < count; i++) {
+        dst_ptr[i] = (_Float16)data[i];
+    }
+
+    IOSurfaceUnlock(dst, 0, NULL);
+}
+
 #pragma mark - Release
 
 void orion_tensor_release(IOSurfaceRef surface) {

@@ -34,4 +34,18 @@ void orion_cpu_adam_step(float* param, const float* grad,
 void orion_cpu_dw_accum(float* dw, const float* x, const float* dy,
                         int m, int n, int k);
 
+/// RMSNorm backward on CPU.
+/// Computes dx (gradient to input) and accumulates dweight.
+/// x: [dim * seq], weight: [dim], dy: [dim * seq] (incoming gradient)
+/// dx: [dim * seq] (output gradient), dweight: [dim] (accumulated)
+void orion_cpu_rmsnorm_bwd(float* dx, float* dweight,
+                            const float* dy, const float* x,
+                            const float* weight,
+                            int dim, int seq_len, float eps);
+
+/// Embedding backward: accumulate gradients into embedding table.
+/// dembed[token[i]] += dy[i] for each position i.
+void orion_cpu_embedding_bwd(float* dembed, const float* dy,
+                              const int* tokens, int dim, int seq_len);
+
 #endif // ORION_STORIES_CPU_OPS_H

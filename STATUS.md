@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M3 — Training (IN PROGRESS)** — CPU training ops (T057-T061), tokenizer (T062), data loader (T063), ANE training kernels (T064-T071) all done. Next: training step wiring (T072+).
+**M3 — Training (IN PROGRESS)** — CPU training ops (T057-T061), tokenizer (T062), data loader (T063), ANE training kernels (T064-T071), single training step (T072) all done. Next: GCD async dW overlap (T073+).
 
 ## Milestone Progress
 
@@ -95,7 +95,7 @@
 | MIL qkvBwd kernel | T069 | L | **DONE** |
 | MIL classifier fwd | T070 | M | **DONE** |
 | MIL vocab softmax | T071 | M | **DONE** |
-| Single training step | T072 | XL | Pending |
+| Single training step | T072 | XL | **DONE** |
 | GCD async dW overlap | T073 | M | Pending |
 | Gradient accumulation | T074 | M | Pending |
 | Checkpoint save | T075 | L | Pending |
@@ -105,7 +105,7 @@
 | CLI arg parsing (train) | T079 | M | Pending |
 | Wire orion train E2E | T080 | L | Pending |
 | Training profiler | T081 | S | Pending |
-| Training smoke test | T082 | M | Pending |
+| Training smoke test | T082 | M | **DONE** |
 | Checkpoint resume test | T083 | M | Pending |
 
 ### M4 — Weight Swapping
@@ -139,11 +139,11 @@
 - **M0**: 11/11 complete (ALL DONE)
 - **M1**: 35/35 complete (ALL DONE)
 - **M2**: 10/10 complete (ALL DONE)
-- **M3**: 15/27 complete
+- **M3**: 17/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 71/98 complete (0 in progress)
+- **Grand Total**: 73/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log
@@ -155,6 +155,7 @@
 | 2026-03-03 | Mode A (recompile) before Mode B (LoRA) | Recompile is proven in upstream; LoRA is experimental |
 | 2026-03-03 | ANEgpt checkpoint format (CkptHdr) | Compatibility with upstream; proven to work |
 | 2026-03-03 | Multi-output instead of concat for training kernels | ANE compiler rejects concat along axis=1; multi-output via orion_mil_program_multi works |
+| 2026-03-03 | Uniform output IOSurface sizes for multi-output ANE programs | ANE eval fails with status 0x1d if output buffers differ in size; pad all to max |
 
 ## Blockers
 - **None** — M0 complete, ready for M1
@@ -166,5 +167,6 @@
 | ~119 compile limit per process | Training requires exec() restart | **Validated** — exec() restart works (T004/T007) |
 | SDPA ignores causal masks | Wrong attention outputs | **Confirmed** — must decompose manually (T008 doc) |
 | ANE minimum tensor size | Small tensors fail at eval | **NEW** — [1,4,1,4] fails; [1,256,1,64] works |
+| ANE multi-output buffer sizes | Mixed-size outputs fail eval | **SOLVED** — pad all output IOSurfaces to max size |
 | GPT-2 BPE tokenizer complexity | Large task (T028) | Open — may wrap tiktoken as fallback |
 | fp16 numerical drift | Golden tests may need relaxed tolerance | Open — two-tier tolerance planned |

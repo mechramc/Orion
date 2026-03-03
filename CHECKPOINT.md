@@ -9,16 +9,49 @@
 ## Last Updated By
 - **Tool**: Claude Code
 - **Date**: 2026-03-03
-- **Session**: 5
+- **Session**: 6
 
 ## Current State
-- **Phase**: M3 — Training (15/27 done)
-- **Last completed**: T064-T071 — ANE training kernels (all 6 kernel types + classifier + softmax)
-- **Next task**: T072 (Single training step — XL)
+- **Phase**: M3 — Training (17/27 done)
+- **Last completed**: T072 — Single training step (forward + loss + backward + dW + Adam), T082 — Training smoke test
+- **Next task**: T073 (GCD async dW overlap)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
-- **Known issues**: ANE compile dominates prefill time (~83%) — program cache (M4) will fix; HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead
-- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 15/15
+- **Known issues**: ANE compile dominates prefill time (~83%) — program cache (M4) will fix; HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 16/16, test_train_smoke 4/4
+
+## What Just Happened (Session 6 — M3 Training Step)
+
+### T072: Single Training Step (XL)
+1. Implemented `stories_train.h` — full trainer data structures: `OrionTrainer`, `OrionLayerKernels`, `OrionLayerWeights`, `OrionLayerGrads`, `OrionLayerAdam`, `OrionLayerIO`
+2. Implemented `stories_train.m` (~712 lines) — complete training step:
+   - `orion_trainer_create` — compiles all ANE programs (6 per layer), loads weights from BLOBFILE format, allocates all buffers
+   - `orion_train_step` — embedding → fwd layers (ANE) → final RMSNorm + classifier (CPU cblas_sgemm) → cross-entropy loss → backward classifier + RMSNorm (CPU) → backward layers (ANE + CPU dW) → embedding backward
+   - `orion_trainer_adam_update` — Adam with bias correction for all parameters
+   - `orion_trainer_zero_grads` — zero all gradient buffers
+   - `orion_trainer_free` — cleanup all resources
+3. CPU↔ANE data flow uses `io_read_transpose` (ANE [C,S] → CPU [S,C]) and `io_write_transpose` (CPU [S,C] → ANE [C,S])
+4. Backward input assembly uses `orion_tensor_copy_into` for zero-copy fp16 IOSurface region copies
+
+### Key Finding: ANE Multi-Output Requires Uniform Buffer Sizes
+- `ANEProgramProcessRequestDirect() Failed with status=0x1d : Program Inference error`
+- Root cause: fwdFFN has mixed-size outputs ([d,s] and [h,s]). ANE eval requires ALL output IOSurfaces to have the same allocation size.
+- **Fix**: Pad all multi-output IOSurfaces to max channel size per kernel. e.g., fwdFFN outputs all use max(d,h)=h channels.
+- Same fix applied to ffnBwd outputs and sdpaBwd1 outputs.
+
+### T082: Training Smoke Test
+- `test_train_smoke.m` — 4 tests with 1-layer config (d=768, h=2048, vocab=256, seq=256)
+- Creates synthetic weight blobs on disk (BLOBFILE format), runs full training loop
+- Verifies: trainer creation, single step finite loss, Adam update, loss decrease over 5 steps
+- Loss: 5.545 → 5.544 (monotonic decrease with synthetic data)
+
+### Also in this session (uncommitted from Session 5)
+- Changed all training kernel outputs from fp32 to fp16 (zero-copy backward input assembly)
+- Added `orion_cpu_rmsnorm_bwd` and `orion_cpu_embedding_bwd` to stories_cpu_ops
+- Added `orion_tensor_copy_into` and `orion_tensor_write_f32_at` to iosurface_tensor
+- Added error logging to `orion_eval` (logs ANE error domain/code on failure)
+
+---
 
 ## What Just Happened (Session 5 — M3 ANE Training Kernels)
 

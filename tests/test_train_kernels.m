@@ -58,8 +58,8 @@ static void test_fwd_attn_milgen(void) {
     ASSERT([mil containsString:@"conv"], @"should contain conv (linear)");
     ASSERT([mil containsString:@"matmul"], @"should contain matmul (attention)");
     ASSERT([mil containsString:@"softmax"], @"should contain softmax");
-    // Multi-output: should return 6 outputs (oo, qf, kf, vf, af, xn)
-    ASSERT([mil containsString:@"-> (oo, qf, kf, vf, af, xn)"], @"should have 6 outputs");
+    // Multi-output: should return 6 fp16 outputs
+    ASSERT([mil containsString:@"-> (wo_out, q_out, k_out, v_out, attn_out, rms1_out)"], @"should have 6 outputs");
     PASS();
 }
 
@@ -118,23 +118,23 @@ static void test_fwd_attn_eval(void) {
     orion_tensor_write_f32(input, in_data, d * s);
     free(in_data);
 
-    // 6 fp32 output surfaces: oo, qf, kf, vf, af, xn — each [1, d, 1, s]
-    IOSurfaceRef out_oo = orion_tensor_create_f32(d, s);
-    IOSurfaceRef out_qf = orion_tensor_create_f32(d, s);
-    IOSurfaceRef out_kf = orion_tensor_create_f32(d, s);
-    IOSurfaceRef out_vf = orion_tensor_create_f32(d, s);
-    IOSurfaceRef out_af = orion_tensor_create_f32(d, s);
-    IOSurfaceRef out_xn = orion_tensor_create_f32(d, s);
+    // 6 fp16 output surfaces — each [1, d, 1, s]
+    IOSurfaceRef out_oo = orion_tensor_create(d, s);
+    IOSurfaceRef out_qf = orion_tensor_create(d, s);
+    IOSurfaceRef out_kf = orion_tensor_create(d, s);
+    IOSurfaceRef out_vf = orion_tensor_create(d, s);
+    IOSurfaceRef out_af = orion_tensor_create(d, s);
+    IOSurfaceRef out_xn = orion_tensor_create(d, s);
 
     IOSurfaceRef inputs[] = {input};
     IOSurfaceRef outputs[] = {out_oo, out_qf, out_kf, out_vf, out_af, out_xn};
     bool ok = orion_eval(prog, inputs, 1, outputs, 6);
     ASSERT(ok, @"eval should succeed");
 
-    // Verify each output has finite values (fp32 direct read)
+    // Verify each output has finite values (fp16→fp32 conversion on read)
     float *buf = calloc(d * s, sizeof(float));
     for (int o = 0; o < 6; o++) {
-        orion_tensor_read_f32_direct(outputs[o], buf, d * s);
+        orion_tensor_read_f32(outputs[o], buf, d * s);
         int finite_count = 0;
         for (int i = 0; i < d * s; i++) {
             if (isfinite(buf[i])) finite_count++;
@@ -156,8 +156,8 @@ static void test_fwd_ffn_milgen(void) {
     NSString *mil = orion_milgen_fwd_ffn(0, &kStories110M);
     ASSERT(mil != nil, @"should generate MIL");
     ASSERT([mil containsString:@"sigmoid"], @"should contain sigmoid (for SiLU)");
-    // Multi-output: 5 outputs (y, h1, h3, gt, xn)
-    ASSERT([mil containsString:@"-> (y, h1, h3, gt, xn)"], @"should have 5 outputs");
+    // Multi-output: 5 fp16 outputs
+    ASSERT([mil containsString:@"-> (w2_out, w1_out, w3_out, gate, rms2_out)"], @"should have 5 outputs");
     PASS();
 }
 
@@ -177,6 +177,63 @@ static void test_fwd_ffn_compile(void) {
     OrionProgram *prog = orion_compile_mil(mil.UTF8String, wdict, NULL);
     ASSERT(prog != NULL, @"fwdFFN should compile on ANE");
 
+    orion_release_program(prog);
+    PASS();
+}
+
+static void test_fwd_ffn_eval(void) {
+    orion_ane_init();
+
+    NSString *mil = orion_milgen_fwd_ffn(0, &kStories110M);
+    int d = kStories110M.d_model;
+    int h = kStories110M.hidden_dim;
+    int s = kStories110M.max_seq;
+
+    NSArray *paths = @[
+        @"layer0/rms2.bin", @"layer0/w1.bin", @"layer0/w3.bin", @"layer0/w2.bin"
+    ];
+    NSArray *sizes = @[@(d), @(h*d), @(h*d), @(d*h)];
+
+    NSDictionary *wdict = make_random_wdict(paths, sizes);
+    OrionProgram *prog = orion_compile_mil(mil.UTF8String, wdict, "fwdFFN_eval_test");
+    ASSERT(prog != NULL, @"should compile");
+
+    // Create input tensor [1, d, 1, s] fp16
+    IOSurfaceRef input = orion_tensor_create(d, s);
+    float *in_data = calloc(d * s, sizeof(float));
+    for (int i = 0; i < d * s; i++) in_data[i] = 0.01f * sinf((float)i * 0.1f);
+    orion_tensor_write_f32(input, in_data, d * s);
+    free(in_data);
+
+    // ANE requires all multi-output IOSurfaces to be the same allocation size.
+    // Use max(d, h) = h for all outputs.
+    IOSurfaceRef out_w2  = orion_tensor_create(h, s);   // w2_out [d, s] (padded)
+    IOSurfaceRef out_w1  = orion_tensor_create(h, s);   // w1_out [h, s]
+    IOSurfaceRef out_w3  = orion_tensor_create(h, s);   // w3_out [h, s]
+    IOSurfaceRef out_gt  = orion_tensor_create(h, s);   // gate [h, s]
+    IOSurfaceRef out_xn  = orion_tensor_create(h, s);   // rms2_out [d, s] (padded)
+
+    IOSurfaceRef inputs[] = {input};
+    IOSurfaceRef outputs[] = {out_w2, out_w1, out_w3, out_gt, out_xn};
+    bool ok = orion_eval(prog, inputs, 1, outputs, 5);
+    ASSERT(ok, @"fwdFFN eval should succeed");
+
+    // Verify outputs are finite (read logical sizes, not padded sizes)
+    float *buf = calloc(h * s, sizeof(float));
+    int logical_sizes[] = {d*s, h*s, h*s, h*s, d*s};
+    for (int o = 0; o < 5; o++) {
+        orion_tensor_read_f32(outputs[o], buf, logical_sizes[o]);
+        int finite_count = 0;
+        for (int i = 0; i < logical_sizes[o]; i++) {
+            if (isfinite(buf[i])) finite_count++;
+        }
+        NSString *msg = [NSString stringWithFormat:@"output %d should be all finite", o];
+        ASSERT(finite_count == logical_sizes[o], msg);
+    }
+
+    free(buf);
+    CFRelease(input);
+    for (int i = 0; i < 5; i++) CFRelease(outputs[i]);
     orion_release_program(prog);
     PASS();
 }
@@ -321,6 +378,7 @@ int main(int argc, const char* argv[]) {
         NSLog(@"\n=== T065: fwdFFN Tests ===");
         test_fwd_ffn_milgen();
         test_fwd_ffn_compile();
+        test_fwd_ffn_eval();
 
         NSLog(@"\n=== T066: ffnBwd Tests ===");
         test_ffn_bwd_milgen();

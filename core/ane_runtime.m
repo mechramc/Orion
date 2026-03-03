@@ -175,6 +175,9 @@ bool orion_eval(
             model, @selector(evaluateWithQoS:options:request:error:),
             21, @{}, req, &e);
 
+        if (!ok && e) {
+            NSLog(@"orion_eval ERROR [%s]: %@", prog->tag, e);
+        }
         return ok;
     }
 }

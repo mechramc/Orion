@@ -102,3 +102,54 @@ void orion_cpu_dw_accum(float* dw, const float* x, const float* dy,
                 1.0f, x, n, dy, k,
                 1.0f, dw, k);
 }
+
+// RMSNorm backward on CPU.
+// For each sequence position:
+//   rrms = 1/sqrt(mean(x^2) + eps)
+//   dx = weight * dy * rrms - x * (sum(weight * dy * x) / (dim * (mean(x^2) + eps)))
+//   dweight += dy * x * rrms
+void orion_cpu_rmsnorm_bwd(float* dx, float* dweight,
+                            const float* dy, const float* x,
+                            const float* weight,
+                            int dim, int seq_len, float eps) {
+    for (int t = 0; t < seq_len; t++) {
+        const float* x_t = x + t * dim;
+        const float* dy_t = dy + t * dim;
+        float* dx_t = dx + t * dim;
+
+        // Recompute rrms for this position
+        float ss = 0.0f;
+        vDSP_dotpr(x_t, 1, x_t, 1, &ss, dim);
+        float ms = ss / (float)dim;
+        float rrms = 1.0f / sqrtf(ms + eps);
+
+        // Compute sum(weight * dy * x) for the correction term
+        float dot_wdx = 0.0f;
+        for (int i = 0; i < dim; i++) {
+            dot_wdx += weight[i] * dy_t[i] * x_t[i];
+        }
+        float correction = dot_wdx * rrms * rrms * rrms / (float)dim;
+
+        // dx = weight * dy * rrms - x * correction
+        for (int i = 0; i < dim; i++) {
+            dx_t[i] = weight[i] * dy_t[i] * rrms - x_t[i] * correction;
+        }
+
+        // Accumulate dweight: dweight[i] += dy[i] * x[i] * rrms
+        for (int i = 0; i < dim; i++) {
+            dweight[i] += dy_t[i] * x_t[i] * rrms;
+        }
+    }
+}
+
+// Embedding backward: accumulate gradients into embedding table
+void orion_cpu_embedding_bwd(float* dembed, const float* dy,
+                              const int* tokens, int dim, int seq_len) {
+    for (int t = 0; t < seq_len; t++) {
+        int tok = tokens[t];
+        const float* dy_t = dy + t * dim;
+        float* dembed_t = dembed + tok * dim;
+        // Accumulate: dembed[tok] += dy[t]
+        vDSP_vadd(dembed_t, 1, dy_t, 1, dembed_t, 1, dim);
+    }
+}

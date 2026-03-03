@@ -36,6 +36,26 @@ void orion_tensor_read_f32(IOSurfaceRef surface, float* data, int count);
 /// Used with orion_tensor_create_f32 output surfaces.
 void orion_tensor_read_f32_direct(IOSurfaceRef surface, float* data, int count);
 
+/// Copy fp16 data from one IOSurface into another at a channel offset.
+/// Used to assemble backward kernel inputs from forward tap outputs.
+/// dst must be pre-allocated with enough space.
+/// @param dst Destination IOSurface
+/// @param dst_ch_offset Channel offset in destination (element offset = dst_ch_offset * seq_len)
+/// @param src Source IOSurface (full copy)
+/// @param channels Number of channels in source
+/// @param seq_len Sequence length
+void orion_tensor_copy_into(IOSurfaceRef dst, int dst_ch_offset,
+                             IOSurfaceRef src, int channels, int seq_len);
+
+/// Write fp32 data as fp16 into an IOSurface at a channel offset.
+/// @param dst Destination IOSurface
+/// @param dst_ch_offset Channel offset in destination
+/// @param data Source fp32 data
+/// @param channels Number of channels to write
+/// @param seq_len Sequence length
+void orion_tensor_write_f32_at(IOSurfaceRef dst, int dst_ch_offset,
+                                const float* data, int channels, int seq_len);
+
 /// Release an IOSurface tensor.
 void orion_tensor_release(IOSurfaceRef surface);
 

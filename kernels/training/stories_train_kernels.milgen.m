@@ -51,20 +51,13 @@ NSString* orion_milgen_fwd_attn(int layer_idx, const OrionModelConfig* cfg) {
     // Output projection (no bias)
     [body appendString:orion_mil_linear("wo", "attn_out", d, d, s, wo.UTF8String, NULL)];
 
-    // Multi-output: cast each tap to fp32 separately
-    // Outputs: oo (Wo), qf (Q), kf (K), vf (V), af (attn), xn (RMSNorm)
-    [body appendString:mil_cast_fp32(@"oo", @"wo_out", d, s)];
-    [body appendString:mil_cast_fp32(@"qf", @"q_out", d, s)];
-    [body appendString:mil_cast_fp32(@"kf", @"k_out", d, s)];
-    [body appendString:mil_cast_fp32(@"vf", @"v_out", d, s)];
-    [body appendString:mil_cast_fp32(@"af", @"attn_out", d, s)];
-    [body appendString:mil_cast_fp32(@"xn", @"rms1_out", d, s)];
-
+    // Multi-output: fp16 outputs (zero-copy for backward input assembly)
+    // oo=Wo output, qf=Q, kf=K, vf=V, af=attn, xn=RMSNorm
     NSString *input_decl = [NSString stringWithFormat:
         @"tensor<fp16, [1,%d,1,%d]> x", d, s];
 
     return orion_mil_program_multi(body, @[input_decl],
-        @[@"oo", @"qf", @"kf", @"vf", @"af", @"xn"]);
+        @[@"wo_out", @"q_out", @"k_out", @"v_out", @"attn_out", @"rms1_out"]);
 }
 
 #pragma mark - T065: fwdFFN — FFN Forward with Taps
@@ -105,19 +98,13 @@ NSString* orion_milgen_fwd_ffn(int layer_idx, const OrionModelConfig* cfg) {
     // Down-projection: y = W2 @ gate → [1, d_model, 1, seq]
     [body appendString:orion_mil_linear("w2", "gate", h, d, s, w2.UTF8String, NULL)];
 
-    // Multi-output: cast each tap to fp32 separately
-    // Outputs: y (W2), h1 (W1), h3 (W3), gt (gate), xn (RMSNorm)
-    [body appendString:mil_cast_fp32(@"y", @"w2_out", d, s)];
-    [body appendString:mil_cast_fp32(@"h1", @"w1_out", h, s)];
-    [body appendString:mil_cast_fp32(@"h3", @"w3_out", h, s)];
-    [body appendString:mil_cast_fp32(@"gt", @"gate", h, s)];
-    [body appendString:mil_cast_fp32(@"xn", @"rms2_out", d, s)];
-
+    // Multi-output: fp16 outputs
+    // y=W2 output, h1=W1, h3=W3, gt=gate, xn=RMSNorm
     NSString *input_decl = [NSString stringWithFormat:
         @"tensor<fp16, [1,%d,1,%d]> x", d, s];
 
     return orion_mil_program_multi(body, @[input_decl],
-        @[@"y", @"h1", @"h3", @"gt", @"xn"]);
+        @[@"w2_out", @"w1_out", @"w3_out", @"gate", @"rms2_out"]);
 }
 
 #pragma mark - T066: ffnBwd — FFN Backward
@@ -201,16 +188,12 @@ NSString* orion_milgen_ffn_bwd(int layer_idx, const OrionModelConfig* cfg) {
     [body appendFormat:
         @"        tensor<fp16, [1,%d,1,%d]> dx = add(x=w1t_out, y=w3t_out)[name=string(\"dx\")];\n", d, s];
 
-    // Multi-output: cast each to fp32
-    [body appendString:mil_cast_fp32(@"dx_out", @"dx", d, s)];
-    [body appendString:mil_cast_fp32(@"dh1_out", @"dh1", h, s)];
-    [body appendString:mil_cast_fp32(@"dh3_out", @"dh3", h, s)];
-
+    // Multi-output: fp16 outputs
     NSString *input_decl = [NSString stringWithFormat:
         @"tensor<fp16, [1,%d,1,%d]> inp", total_in, s];
 
     return orion_mil_program_multi(body, @[input_decl],
-        @[@"dx_out", @"dh1_out", @"dh3_out"]);
+        @[@"dx", @"dh1", @"dh3"]);
 }
 
 #pragma mark - T067: sdpaBwd1 — SDPA Backward Part 1
@@ -347,16 +330,12 @@ NSString* orion_milgen_sdpa_bwd1(int layer_idx, const OrionModelConfig* cfg) {
         @"        tensor<fp16, [1,%d,1,%d]> dpf = reshape(shape=rsh_sc, x=dp4)[name=string(\"dpf\")];\n",
         sc_ch, s];
 
-    // Multi-output: cast each to fp32
-    [body appendString:mil_cast_fp32(@"dvf_out", @"dvf", d, s)];
-    [body appendString:mil_cast_fp32(@"pf_out", @"pf", sc_ch, s)];
-    [body appendString:mil_cast_fp32(@"dpf_out", @"dpf", sc_ch, s)];
-
+    // Multi-output: fp16 outputs
     NSString *input_decl = [NSString stringWithFormat:
         @"tensor<fp16, [1,%d,1,%d]> inp", total_in, s];
 
     return orion_mil_program_multi(body, @[input_decl],
-        @[@"dvf_out", @"pf_out", @"dpf_out"]);
+        @[@"dvf", @"pf", @"dpf"]);
 }
 
 #pragma mark - T068: sdpaBwd2 — SDPA Backward Part 2
@@ -468,15 +447,12 @@ NSString* orion_milgen_sdpa_bwd2(int layer_idx, const OrionModelConfig* cfg) {
          "        tensor<fp16, [1,%d,1,%d]> dkf = reshape(shape=rsh_d, x=dkt)[name=string(\"dkf\")];\n",
         nh, hd, s, d, s];
 
-    // Multi-output: cast each to fp32
-    [body appendString:mil_cast_fp32(@"dqf_out", @"dqf", d, s)];
-    [body appendString:mil_cast_fp32(@"dkf_out", @"dkf", d, s)];
-
+    // Multi-output: fp16 outputs
     NSString *input_decl = [NSString stringWithFormat:
         @"tensor<fp16, [1,%d,1,%d]> inp", total_in, s];
 
     return orion_mil_program_multi(body, @[input_decl],
-        @[@"dqf_out", @"dkf_out"]);
+        @[@"dqf", @"dkf"]);
 }
 
 #pragma mark - T069: qkvBwd — QKV Backward
@@ -525,10 +501,9 @@ NSString* orion_milgen_qkv_bwd(int layer_idx, const OrionModelConfig* cfg) {
          "        tensor<fp16, [1,%d,1,%d]> dx = add(x=dx_qk, y=wvt_out)[name=string(\"dx\")];\n",
         d, s, d, s];
 
-    [body appendString:mil_cast_fp32(@"output", @"dx", d, s)];
-
+    // Single fp16 output
     NSString *input_decl = [NSString stringWithFormat:
         @"tensor<fp16, [1,%d,1,%d]> inp", total_in, s];
 
-    return orion_mil_program(body, @[input_decl], @"output");
+    return orion_mil_program(body, @[input_decl], @"dx");
 }
