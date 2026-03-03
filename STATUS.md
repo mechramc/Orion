@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M2 — ANE Prefill Inference (IN PROGRESS)** — 8/10 tasks done. Full 12-layer ANE prefill works: "The quick brown fox" → argmax=274 ("jumps"), exact CPU match, 5/5 top-5 overlap. Next: T054 (wire hybrid inference), T055 (golden tests), T056 (benchmark).
+**M2 — ANE Prefill Inference (COMPLETE)** — All 10 tasks done. Full 12-layer ANE prefill on Neural Engine, hybrid inference (ANE prefill → CPU decode) wired into CLI with `--ane` flag. Golden vectors exact match. Ready for M3 (Training).
 
 ## Milestone Progress
 
@@ -73,9 +73,9 @@
 | Prompt padding for ANE | T051 | M | **DONE** |
 | ANE prefill runner | T052 | XL | **DONE** |
 | Extract K,V to cache | T053 | M | **DONE** |
-| Wire hybrid inference | T054 | L | Pending |
-| ANE golden tests | T055 | M | Pending |
-| Benchmark ANE vs CPU | T056 | S | Pending |
+| Wire hybrid inference | T054 | L | **DONE** |
+| ANE golden tests | T055 | M | **DONE** |
+| Benchmark ANE vs CPU | T056 | S | **DONE** |
 
 ### M3 — Training (Stories110M)
 | Task | ID | Size | Status |
@@ -138,12 +138,12 @@
 ## Task Progress
 - **M0**: 11/11 complete (ALL DONE)
 - **M1**: 35/35 complete (ALL DONE)
-- **M2**: 8/10 complete
+- **M2**: 10/10 complete (ALL DONE)
 - **M3**: 0/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 54/98 complete (0 in progress)
+- **Grand Total**: 56/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log

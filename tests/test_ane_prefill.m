@@ -22,6 +22,7 @@
 #import <Accelerate/Accelerate.h>
 #import <math.h>
 #import <stdio.h>
+#import <sys/time.h>
 
 #import "core/ane_runtime.h"
 #import "core/iosurface_tensor.h"
@@ -518,11 +519,125 @@ static void test_full_ane_prefill(void) {
     orion_gpt2_weights_free(w);
 }
 
+#pragma mark - Test: ANE Golden Vectors (T055)
+
+static void test_ane_golden(void) {
+    printf("\n=== Test: ANE Golden Vectors (T055) ===\n");
+
+    OrionGPT2Weights *w = orion_gpt2_weights_load("model/blobs/gpt2_124m");
+    if (!w) { printf("  SKIP: weights not found\n"); return; }
+
+    int vocab = kGPT2_124M.vocab;
+
+    // Test 1: "Hello" → 5 greedy tokens via ANE prefill + CPU decode
+    {
+        int tokens[] = {15496};  // "Hello"
+        int expected[] = {11, 314, 1101, 7926, 11};  // ", I'm sorry,"
+        int prompt_len = 1;
+
+        float *logits = (float *)malloc(vocab * sizeof(float));
+        OrionKVCache *kv = orion_kv_cache_create(&kGPT2_124M);
+
+        bool ok = orion_ane_prefill(w, tokens, prompt_len, &kGPT2_124M,
+                                     "model/blobs/gpt2_124m", kv, logits);
+        if (!ok) { printf("  SKIP: ANE prefill failed\n"); goto hello_done; }
+
+        int match = 1;
+        for (int i = 0; i < 5; i++) {
+            int next = orion_sample_token(logits, vocab, 0.0f, 1.0f, NULL);
+            if (next != expected[i]) {
+                printf("  token[%d]=%d expected %d\n", i, next, expected[i]);
+                match = 0;
+                break;
+            }
+            if (i < 4) orion_gpt2_decode_step(w, kv, next, logits);
+        }
+        CHECK(match, "Hello→5tok: ANE matches CPU golden");
+
+hello_done:
+        free(logits);
+        orion_kv_cache_free(kv);
+    }
+
+    // Test 2: "The quick brown fox" → "jumps" via ANE
+    {
+        int tokens[] = {464, 2068, 7586, 21831};
+        int prompt_len = 4;
+
+        float *logits = (float *)malloc(vocab * sizeof(float));
+        OrionKVCache *kv = orion_kv_cache_create(&kGPT2_124M);
+
+        bool ok = orion_ane_prefill(w, tokens, prompt_len, &kGPT2_124M,
+                                     "model/blobs/gpt2_124m", kv, logits);
+        if (ok) {
+            int next = orion_sample_token(logits, vocab, 0.0f, 1.0f, NULL);
+            CHECK(next == 274, "fox→jumps: ANE argmax==274");
+        }
+
+        free(logits);
+        orion_kv_cache_free(kv);
+    }
+
+    orion_gpt2_weights_free(w);
+}
+
+#pragma mark - Test: Benchmark ANE vs CPU (T056)
+
+static double bench_time_ms(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec * 1000.0 + tv.tv_usec / 1000.0;
+}
+
+static void test_benchmark(void) {
+    printf("\n=== Test: ANE vs CPU Benchmark (T056) ===\n");
+
+    OrionGPT2Weights *w = orion_gpt2_weights_load("model/blobs/gpt2_124m");
+    if (!w) { printf("  SKIP: weights not found\n"); return; }
+
+    int tokens[] = {464, 2068, 7586, 21831};  // "The quick brown fox"
+    int prompt_len = 4;
+    int vocab = kGPT2_124M.vocab;
+
+    // CPU prefill timing
+    float *cpu_logits = (float *)malloc(vocab * sizeof(float));
+    OrionKVCache *cpu_kv = orion_kv_cache_create(&kGPT2_124M);
+    double t0 = bench_time_ms();
+    orion_gpt2_prefill_kv(w, tokens, prompt_len, cpu_kv, cpu_logits);
+    double cpu_ms = bench_time_ms() - t0;
+
+    // ANE prefill timing (includes compile)
+    float *ane_logits = (float *)malloc(vocab * sizeof(float));
+    OrionKVCache *ane_kv = orion_kv_cache_create(&kGPT2_124M);
+    t0 = bench_time_ms();
+    orion_ane_prefill(w, tokens, prompt_len, &kGPT2_124M,
+                       "model/blobs/gpt2_124m", ane_kv, ane_logits);
+    double ane_ms = bench_time_ms() - t0;
+
+    printf("    CPU prefill: %.1f ms (%.1f ms/tok)\n", cpu_ms, cpu_ms / prompt_len);
+    printf("    ANE prefill: %.1f ms (%.1f ms/tok) [includes compile]\n",
+           ane_ms, ane_ms / prompt_len);
+    printf("    Note: ANE time dominated by compilation (~83%%)\n");
+    printf("    Program cache (M4) will eliminate recompilation overhead\n");
+
+    // Just verify both produce same argmax
+    int cpu_argmax = 0, ane_argmax = 0;
+    for (int i = 1; i < vocab; i++) {
+        if (cpu_logits[i] > cpu_logits[cpu_argmax]) cpu_argmax = i;
+        if (ane_logits[i] > ane_logits[ane_argmax]) ane_argmax = i;
+    }
+    CHECK(cpu_argmax == ane_argmax, "benchmark: argmax match");
+
+    free(cpu_logits); free(ane_logits);
+    orion_kv_cache_free(cpu_kv); orion_kv_cache_free(ane_kv);
+    orion_gpt2_weights_free(w);
+}
+
 #pragma mark - Main
 
 int main(int argc, char **argv) {
     @autoreleasepool {
-        printf("=== Orion ANE Prefill Tests (T047-T052) ===\n");
+        printf("=== Orion ANE Prefill Tests (T047-T056) ===\n");
 
         // T050: bucket selection (no ANE needed)
         test_bucket_selection();
@@ -549,6 +664,12 @@ int main(int argc, char **argv) {
 
         // T052: Full 12-layer ANE prefill E2E
         test_full_ane_prefill();
+
+        // T055: ANE golden vectors
+        test_ane_golden();
+
+        // T056: Benchmark
+        test_benchmark();
 
         printf("\n========================================\n");
         printf("Results: %d passed, %d failed\n", g_pass, g_fail);

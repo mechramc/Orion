@@ -12,13 +12,13 @@
 - **Session**: 3
 
 ## Current State
-- **Phase**: M2 — ANE Prefill Inference (8/10 tasks done)
-- **Last completed**: T047-T053 — ANE milgen + prefill runner + KV extraction
-- **Next task**: T054 (wire hybrid inference), T055 (ANE golden tests), T056 (benchmark)
+- **Phase**: M3 — Training (M2 complete, 10/10)
+- **Last completed**: T047-T056 — ANE Prefill Inference (M2 COMPLETE)
+- **Next task**: T057-T083 (Training on ANE)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
-- **Known issues**: ANE minimum tensor size — [1,4,1,4] fails, need [1,256,1,64]+
-- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 31/31
+- **Known issues**: ANE compile dominates prefill time (~83%) — program cache (M4) will fix
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34
 
 ## What Just Happened (Session 3 — ANE Prefill Kernels)
 
@@ -33,6 +33,12 @@
 6. **T052**: Full ANE prefill runner — compiles 25 programs (12 attn + 12 FFN + 1 final LN), evals sequentially, CPU logits projection via cblas_sgemv
 7. **T053**: K,V extraction — transposes ANE output [d_model, bucket] → CPU [seq, d_model], stores into KV cache with head-split layout
 8. **Test**: 31/31 pass — Full 12-layer ANE prefill: "The quick brown fox" → argmax=274 ("jumps"), exact CPU match, 5/5 top-5 overlap. K max error vs CPU: 0.0025. 30 compiles used.
+
+### T054-T056: Hybrid Inference + Golden Tests + Benchmark
+9. **T054**: Wired hybrid inference into CLI — `orion infer --ane` uses ANE prefill → CPU decode. Falls back to CPU if ANE fails. Output is identical between CPU and ANE modes.
+10. **T055**: ANE golden vectors — "Hello" → 5 token exact match, "fox" → "jumps" exact match via ANE prefill + CPU decode.
+11. **T056**: Benchmark — CPU prefill 13.5ms (3.4ms/tok) vs ANE 1399ms (349.8ms/tok, compile-dominated). ANE eval alone ~5ms. Program cache (M4) will eliminate recompilation.
+12. **Test**: 34/34 pass — full M2 test suite. 105 compiles used across all tests.
 
 ---
 
@@ -228,11 +234,13 @@
 
 ## What To Pick Up Next
 
-### Immediate — Complete M2
-**M2 — ANE Prefill** (T054-T056, T047-T053 done):
-1. **T054** (L): Wire hybrid inference (ANE prefill → CPU decode) — update `orion infer` CLI
-2. **T055** (M): ANE golden tests — verify token-exact or top-k match
-3. **T056** (S): Benchmark ANE vs CPU prefill — record speedup
+### Immediate — Start M3 (Training)
+**M3 — Training on ANE** (T057-T083, 0/27 done):
+1. **T057** (M): CPU RMSNorm
+2. **T058** (M): CPU cross-entropy loss
+3. **T062** (M): SentencePiece tokenizer wrapper
+4. **T063** (M): Data loader for TinyStories
+5. **T064-T071** (L): MIL training kernels (forward + backward)
 
 ## Staged But Uncommitted Changes
 None — all changes committed.

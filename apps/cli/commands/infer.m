@@ -4,15 +4,18 @@
 #import <string.h>
 #import <sys/time.h>
 #import "../../../core/profiler.h"
+#import "../../../core/ane_runtime.h"
 #import "../../../model/weight_loader.h"
 #import "../../../model/configs/gpt2_124m.h"
 #import "../../../tokenizer/gpt2_bpe.h"
 #import "../../../kernels/inference/decode_cpu.h"
 #import "../../../kernels/inference/kv_cache.h"
+#import "../../../kernels/inference/prefill_ane.h"
 
 // T041-T042: CLI inference command
+// T054: Wire hybrid inference (ANE prefill → CPU decode)
 //
-// Usage: orion infer --prompt "Hello, world" --max_tokens 64
+// Usage: orion infer --prompt "Hello, world" --max_tokens 64 [--ane]
 
 static void print_infer_help(void) {
     fprintf(stderr,
@@ -24,6 +27,7 @@ static void print_infer_help(void) {
         "  --temperature FLOAT    Sampling temperature (0=greedy, default: 0.0)\n"
         "  --top_p FLOAT          Top-p nucleus sampling (default: 0.9)\n"
         "  --seed N               RNG seed (default: 42)\n"
+        "  --ane                  Use ANE for prefill (default: CPU only)\n"
         "  --weights PATH         Path to weight blobs directory\n"
         "                         (default: model/blobs/gpt2_124m)\n"
         "  --vocab PATH           Path to vocab.json (default: tokenizer/data/vocab.json)\n"
@@ -45,6 +49,7 @@ int orion_cmd_infer(int argc, const char* argv[]) {
     float temperature = 0.0f;
     float top_p = 0.9f;
     uint64_t seed = 42;
+    bool use_ane = false;
     const char* weights_path = "model/blobs/gpt2_124m";
     const char* vocab_path = "tokenizer/data/vocab.json";
     const char* merges_path = "tokenizer/data/merges.txt";
@@ -60,6 +65,8 @@ int orion_cmd_infer(int argc, const char* argv[]) {
             top_p = atof(argv[++i]);
         } else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
             seed = strtoull(argv[++i], NULL, 10);
+        } else if (strcmp(argv[i], "--ane") == 0) {
+            use_ane = true;
         } else if (strcmp(argv[i], "--weights") == 0 && i + 1 < argc) {
             weights_path = argv[++i];
         } else if (strcmp(argv[i], "--vocab") == 0 && i + 1 < argc) {
@@ -76,6 +83,14 @@ int orion_cmd_infer(int argc, const char* argv[]) {
         fprintf(stderr, "Error: --prompt is required\n\n");
         print_infer_help();
         return 1;
+    }
+
+    // Initialize ANE if requested
+    if (use_ane) {
+        if (!orion_ane_init()) {
+            fprintf(stderr, "Warning: ANE init failed, falling back to CPU\n");
+            use_ane = false;
+        }
     }
 
     // Load tokenizer
@@ -118,9 +133,27 @@ int orion_cmd_infer(int argc, const char* argv[]) {
     orion_prof_begin();
 
     // Prefill
-    fprintf(stderr, "Prefilling %d tokens...\n", prompt_len);
+    fprintf(stderr, "Prefilling %d tokens (%s)...\n", prompt_len,
+            use_ane ? "ANE" : "CPU");
     t0 = time_ms();
-    orion_gpt2_prefill_kv(w, prompt_tokens, prompt_len, kv, logits);
+
+    bool prefill_ok;
+    if (use_ane) {
+        prefill_ok = orion_ane_prefill(w, prompt_tokens, prompt_len,
+                                        &kGPT2_124M, weights_path, kv, logits);
+        if (!prefill_ok) {
+            fprintf(stderr, "Warning: ANE prefill failed, falling back to CPU\n");
+            // Reset KV cache
+            orion_kv_cache_free(kv);
+            kv = orion_kv_cache_create(&kGPT2_124M);
+            orion_gpt2_prefill_kv(w, prompt_tokens, prompt_len, kv, logits);
+            prefill_ok = true;
+        }
+    } else {
+        orion_gpt2_prefill_kv(w, prompt_tokens, prompt_len, kv, logits);
+        prefill_ok = true;
+    }
+
     double t_prefill = time_ms() - t0;
     fprintf(stderr, "Prefill: %.1f ms (%.1f ms/token)\n", t_prefill, t_prefill / prompt_len);
 
@@ -128,7 +161,7 @@ int orion_cmd_infer(int argc, const char* argv[]) {
     printf("%s", prompt);
     fflush(stdout);
 
-    // Decode loop
+    // Decode loop (always CPU)
     uint64_t rng_state = seed;
 
     for (int i = 0; i < max_tokens; i++) {
@@ -157,7 +190,8 @@ int orion_cmd_infer(int argc, const char* argv[]) {
     // Print profiler stats
     OrionPerfMetrics metrics = orion_prof_finish(gen_count, 0);
     metrics.prefill_ms = t_prefill;
-    fprintf(stderr, "\nPrompt tokens: %d, Generated tokens: %d\n", prompt_len, gen_count);
+    fprintf(stderr, "\nPrompt tokens: %d, Generated tokens: %d, Backend: %s\n",
+            prompt_len, gen_count, use_ane ? "ANE+CPU" : "CPU");
     orion_prof_print(&metrics);
 
     // Cleanup
