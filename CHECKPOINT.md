@@ -12,15 +12,30 @@
 - **Session**: 1 (continued)
 
 ## Current State
-- **Phase**: M1 — CPU Baseline Inference (7/35 tasks complete)
-- **Last completed**: T012-T018 — Core runtime (IOSurface tensors + ANE compile/eval/release)
-- **Next task**: T019 (MIL linear helper), T024 (BLOBFILE writer), T028 (GPT-2 BPE tokenizer)
+- **Phase**: M1 — CPU Baseline Inference (12/35 tasks complete)
+- **Last completed**: T019-T023 — MIL builder helpers (linear, layernorm, rmsnorm, gelu, silu, causal attention, program wrapper)
+- **Next task**: T024 (BLOBFILE writer), T025 (GPT-2 weight converter), T028 (GPT-2 BPE tokenizer)
 - **Branch**: `main`
 - **Repo is green**: YES (test_ane_runtime: 11/11 pass)
 - **Known issues**: ANE minimum tensor size — [1,4,1,4] fails, need [1,256,1,64]+
-- **Tests passing**: tests/test_ane_runtime — 11/11 PASS
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12
 
 ## What Just Happened (Session 1 continued — M1 Core Runtime)
+
+### T019-T023: MIL Builder Helpers — ALL PASS
+1. **T019**: `orion_mil_linear` — 1×1 conv with BLOBFILE weight refs (3× faster than matmul on ANE)
+2. **T020**: `orion_mil_layernorm` + `orion_mil_rmsnorm` — both compile and eval correctly on ANE
+3. **T021**: `orion_mil_gelu` (decomposed tanh approx, `gelu` MIL op not available) + `orion_mil_silu`
+4. **T022**: `orion_mil_causal_attention` — explicit Q@K^T → mask → softmax → @V (no SDPA)
+5. **T023**: `orion_mil_program` — header + function wrapper, `orion_mil_header()` for reuse
+6. **Test**: `tests/test_mil_builder.m` — 12/12 pass (wrapper, SiLU, GELU, RMSNorm on ANE)
+
+### Key Findings
+- BLOBFILE offset in MIL must be `uint64(64)` (chunk header offset), not `uint64(128)`
+- `gelu` is NOT a valid MIL op — must decompose to `tanh` approximation manually
+- Weight blob offset in weight dict is 0 (start of blob), not 64
+
+---
 
 ### T012-T018: Core Runtime Foundation — ALL PASS
 1. **T012**: `orion_tensor_create` — creates IOSurface with ANE layout [1,C,1,S] fp16
@@ -164,7 +179,8 @@ None — all changes committed.
 2. `1e9f330` — Add atomic task list with 94 tasks across 7 phases
 3. `d9fea4a` — M0 upstream validation: 9/11 tasks complete
 4. `2002a50` — M0 complete: hello MIL + API reference (T008, T009)
-5. `(pending)` — M1 core runtime: IOSurface tensors + ANE compile/eval/release (T012-T018)
+5. `01c3199` — M1 core runtime: IOSurface tensors + ANE compile/eval/release (T012-T018)
+6. `(pending)` — M1 MIL builder helpers: linear, norms, activations, attention (T019-T023)
 
 ## Warnings for Next Session
 - `vendor/` is gitignored — upstream repos must be cloned locally (`git clone` into `vendor/`)

@@ -34,11 +34,11 @@
 | orion_eval | T016 | M | **DONE** |
 | orion_release_program | T017 | M | **DONE** |
 | ANE runtime integration test | T018 | S | **DONE** |
-| MIL linear helper | T019 | M | Pending |
-| MIL layernorm/rmsnorm | T020 | M | Pending |
-| MIL gelu/silu | T021 | S | Pending |
-| MIL causal attention | T022 | L | Pending |
-| MIL program wrapper | T023 | M | Pending |
+| MIL linear helper | T019 | M | **DONE** |
+| MIL layernorm/rmsnorm | T020 | M | **DONE** |
+| MIL gelu/silu | T021 | S | **DONE** |
+| MIL causal attention | T022 | L | **DONE** |
+| MIL program wrapper | T023 | M | **DONE** |
 | BLOBFILE writer | T024 | M | Pending |
 | GPT-2 weight converter | T025 | M | Pending |
 | Weight conversion tests | T026 | S | Pending |
@@ -137,13 +137,13 @@
 
 ## Task Progress
 - **M0**: 11/11 complete (ALL DONE)
-- **M1**: 7/35 complete
+- **M1**: 12/35 complete
 - **M2**: 0/10 complete
 - **M3**: 0/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 18/98 complete (0 in progress)
+- **Grand Total**: 23/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log
