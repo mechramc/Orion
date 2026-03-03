@@ -23,6 +23,7 @@ tests/test_infer_golden
 tests/test_sp_tokenizer
 tests/test_train_kernels
 tests/test_train_smoke
+tests/test_program_cache
 tests/*.dSYM/
 
 # Weight blobs (large binary files)

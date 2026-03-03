@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M3 — Training (COMPLETE)** — All 27 tasks done. v3 spec adopted: ANE full forward inference, runtime abstractions, expanded benchmarks. Next: M4 Weight Swapping + Phase 8 (ANE Full Forward).
+**M4 — Weight Swapping (COMPLETE)** — All 6 tasks done. Program cache (store/lookup), eviction by weights_id, weights_id abstraction, CLI bench swap with 100-iter endurance test (RSS 1.41x, PASS). Next: Phase 8 (ANE Full Forward).
 
 ## Milestone Progress
 
@@ -111,12 +111,12 @@
 ### M4 — Weight Swapping
 | Task | ID | Size | Status |
 |------|----|------|--------|
-| Program cache | T084 | L | Pending |
-| Cache eviction | T085 | M | Pending |
-| weights_id abstraction | T086 | M | Pending |
-| CLI bench swap args | T087 | M | Pending |
-| Swap endurance test | T088 | XL | Pending |
-| Wire bench swap CLI | T089 | S | Pending |
+| Program cache | T084 | L | **DONE** |
+| Cache eviction | T085 | M | **DONE** |
+| weights_id abstraction | T086 | M | **DONE** |
+| CLI bench swap args | T087 | M | **DONE** |
+| Swap endurance test | T088 | XL | **DONE** |
+| Wire bench swap CLI | T089 | S | **DONE** |
 
 ### M5 — Demo App
 | Task | ID | Size | Status |
@@ -174,15 +174,15 @@
 - **M1**: 35/35 complete (ALL DONE)
 - **M2**: 10/10 complete (ALL DONE)
 - **M3**: 27/27 complete (ALL DONE)
-- **M4**: 0/6 complete
+- **M4**: 6/6 complete (ALL DONE)
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
 - **Phase 8 (ANE Full Forward)**: 0/6 complete
 - **Phase 9 (Benchmarks)**: 0/4 complete
 - **Phase 10 (Abstractions)**: 0/5 complete
 - **Phase 11 (Build Quality)**: 0/3 complete
-- **Grand Total**: 83/116 complete (0 in progress)
-- **Critical paths**: Training DONE | ANE inference v3: T099→T102 | Weight swap: T084→T089
+- **Grand Total**: 89/116 complete (0 in progress)
+- **Critical paths**: Training DONE | Weight swap DONE | ANE inference v3: T099→T104 | Benchmarks: T105→T108
 
 ## Decisions Log
 | Date | Decision | Rationale |
@@ -198,9 +198,10 @@
 | 2026-03-03 | v3 spec: Runtime abstraction layers | OrionKernel, OrionModel, OrionRuntime; GPT-2/Stories are reference impls |
 | 2026-03-03 | v3 spec: Expanded benchmark harness | bench kernels, inference, training, swap; SRAM spill detection |
 | 2026-03-03 | v3 spec: Project evolution roadmap | Stage 1 (Core) → Stage 2 (Compiler/auto-tune) → Stage 3 (Platform) |
+| 2026-03-03 | Program cache: store/lookup (not compile-on-miss) | Cache can't know how to compile each kernel type; callers compile on miss and store |
 
 ## Blockers
-- **None** — M3 complete, M4 and Phase 8 ready to start
+- **None** — M4 complete, Phase 8 ready to start
 
 ## Risks
 | Risk | Impact | Status |

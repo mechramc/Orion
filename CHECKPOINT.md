@@ -9,17 +9,57 @@
 ## Last Updated By
 - **Tool**: Claude Code
 - **Date**: 2026-03-03
-- **Session**: 7 (v3 spec alignment)
+- **Session**: 8 (M4 Weight Swapping)
 
 ## Current State
-- **Phase**: v3 spec adopted. M0-M3 complete (83/116 tasks). Next: M4 (Weight Swapping) + Phase 8 (ANE Full Forward Inference)
-- **Last completed**: T079-T081 — CLI train command + profiler; v3 spec + design review + 18 new tasks
-- **Next tasks**: T084 (Program cache) and T099 (ANE single-token spike) — can proceed in parallel
+- **Phase**: M4 complete (89/116 tasks). Next: Phase 8 (ANE Full Forward Inference) + Phase 9 (Benchmarks)
+- **Last completed**: T084-T089 — M4 Weight Swapping (program cache, eviction, weights_id, bench swap CLI, 100-iter endurance)
+- **Next tasks**: T099 (ANE single-token spike) → T100-T104 (ANE full forward) or T105-T108 (benchmarks)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Spec version**: ORION_v3_ANE_LLM_SPEC.md (replaces v2)
-- **Known issues**: ANE compile dominates prefill time (~83%) — program cache (M4) will fix; HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes; ANE single-token dispatch latency unknown (T099 will validate)
-- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 16/16, test_train_smoke 7/7
+- **Known issues**: HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes; ANE single-token dispatch latency unknown (T099 will validate)
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 16/16, test_train_smoke 7/7, test_program_cache 42/42
+
+## What Just Happened (Session 8 — M4 Weight Swapping Complete)
+
+### T084: Program Cache (L)
+1. Redesigned API from `orion_get_or_compile` (compile-on-miss) to store/lookup pattern
+   - `orion_cache_lookup(kernel_name, layer_idx, wb)` → hit or NULL
+   - `orion_cache_store(kernel_name, layer_idx, wb, program)` — cache takes ownership
+   - Reason: cache can't generically compile — doesn't know how to generate MIL or build weight dicts
+2. `_OrionCacheEntry` ObjC wrapper — dealloc calls `orion_release_program` for safe cleanup
+3. Thread-safe via `@synchronized` on cache dictionary
+4. Integrated into `prefill_ane.m` — first call compiles (25 programs), subsequent calls are cache hits (0 compiles)
+5. Reports: `ANE prefill: cache N hits, M misses (P programs cached, C compiles total)`
+
+### T085: Cache Eviction (M)
+- `orion_cache_evict(weights_id)` — removes all entries matching weights_id, dealloc releases programs
+- `orion_cache_clear()` — removes all entries
+- Both safe for empty cache / nonexistent IDs
+
+### T086: Weights ID Abstraction (M)
+- `orion_weights_id_next_step()` → "step_00000001", auto-incrementing
+- `orion_weights_id_reset(start_step)` — for checkpoint resume
+- Static buffer — caller must strdup() to keep across calls
+
+### T087: CLI Bench Swap Args (M)
+- `orion bench swap --weights_a PATH --weights_b PATH --iters N --bucket N`
+- Subcommand dispatch: `orion bench <subcommand>`
+- Full --help for both bench and swap
+
+### T088: Swap Endurance Test (XL)
+- 100 iterations: compile → cache → eval → evict → swap weights
+- Reports per-iteration: compile ms, eval ms, cache size, RSS
+- Final report: avg compile/eval/evict ms, RSS start/end/ratio, PASS/WARN
+- **Result**: 100 iters, RSS 1.41x (PASS), avg compile 11.3 ms, avg eval 0.15 ms
+
+### T089: Wire Bench Swap CLI (S)
+- Bench swap fully wired: `./orion bench swap --weights_a A --weights_b B --iters 100` works E2E
+
+### Test Suite
+- New: `tests/test_program_cache.m` — 42 tests (7 test groups)
+  - empty_cache, store_and_lookup, store_multiple, evict_by_weights_id, store_replace, evict_nonexistent, cache_with_eval, weights_id_step, weights_id_with_cache
 
 ## What Just Happened (Session 7 — M3 Completion + v3 Spec Alignment)
 
@@ -47,12 +87,11 @@
 - **Memory leaks**: Swap endurance test (T088) validates cache eviction doesn't leak
 
 ### Execution Priority (recommended order)
-1. T084-T089 (M4 — Weight Swapping) — unblocks everything
-2. T099 (ANE single-token spike) — validates v3 inference architecture feasibility
-3. T114 (Makefile) — reproducible builds
-4. T100-T104 (ANE full forward) — depends on T099 outcome
-5. T105-T108 (Benchmark harness) — depends on T084
-6. T109-T113 (Runtime abstractions) — can be incremental
+1. T099 (ANE single-token spike) — validates v3 inference architecture feasibility
+2. T100-T104 (ANE full forward) — depends on T099 outcome
+3. T105-T108 (Benchmark harness) — M4 unblocked
+4. T114 (Makefile) — reproducible builds
+5. T109-T113 (Runtime abstractions) — can be incremental
 
 ### T079-T080: CLI Train Command
 1. Rewrote `apps/cli/commands/train.m` — full E2E training command
