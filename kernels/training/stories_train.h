@@ -148,6 +148,10 @@ void orion_trainer_adam_update(OrionTrainer* trainer);
 /// Zero all gradient buffers (call before each accumulation batch).
 void orion_trainer_zero_grads(OrionTrainer* trainer);
 
+/// Scale all gradient buffers by a constant (e.g. 1.0/accum_steps).
+/// Call after accumulating N micro-batches, before Adam update.
+void orion_trainer_scale_grads(OrionTrainer* trainer, float scale);
+
 /// Free all trainer resources.
 void orion_trainer_free(OrionTrainer* trainer);
 

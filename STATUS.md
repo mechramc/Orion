@@ -97,7 +97,7 @@
 | MIL vocab softmax | T071 | M | **DONE** |
 | Single training step | T072 | XL | **DONE** |
 | GCD async dW overlap | T073 | M | **DONE** |
-| Gradient accumulation | T074 | M | Pending |
+| Gradient accumulation | T074 | M | **DONE** |
 | Checkpoint save | T075 | L | Pending |
 | Checkpoint resume | T076 | L | Pending |
 | exec() restart | T077 | L | Pending |
@@ -139,11 +139,11 @@
 - **M0**: 11/11 complete (ALL DONE)
 - **M1**: 35/35 complete (ALL DONE)
 - **M2**: 10/10 complete (ALL DONE)
-- **M3**: 18/27 complete
+- **M3**: 19/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 74/98 complete (0 in progress)
+- **Grand Total**: 75/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log

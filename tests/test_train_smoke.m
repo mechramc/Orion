@@ -222,6 +222,46 @@ static void test_loss_decreases(void) {
     PASS();
 }
 
+static void test_gradient_accumulation(void) {
+    NSString *wdir = create_synthetic_weights(&kTinyConfig);
+    OrionTrainer *t = orion_trainer_create(&kTinyConfig, wdir.UTF8String);
+    ASSERT(t != NULL, @"trainer should create");
+
+    int s = kTinyConfig.max_seq;
+    int *input = (int *)malloc(s * sizeof(int));
+    int *target = (int *)malloc(s * sizeof(int));
+    for (int i = 0; i < s; i++) {
+        input[i] = i % kTinyConfig.vocab;
+        target[i] = (i + 1) % kTinyConfig.vocab;
+    }
+
+    // Accumulate 4 micro-batches then apply Adam
+    int accum_steps = 4;
+    orion_trainer_zero_grads(t);
+    float total_loss = 0.0f;
+    for (int mb = 0; mb < accum_steps; mb++) {
+        float loss = orion_train_step(t, input, target);
+        ASSERT(isfinite(loss), @"micro-batch loss should be finite");
+        total_loss += loss;
+    }
+    orion_trainer_scale_grads(t, 1.0f / (float)accum_steps);
+    orion_trainer_adam_update(t);
+    float avg_loss = total_loss / (float)accum_steps;
+    NSLog(@"  Accumulated %d micro-batches, avg loss: %f", accum_steps, avg_loss);
+
+    // After accumulated update, run another step — loss should be finite
+    orion_trainer_zero_grads(t);
+    float loss2 = orion_train_step(t, input, target);
+    NSLog(@"  Post-accumulation loss: %f", loss2);
+    ASSERT(isfinite(loss2), @"post-accumulation loss should be finite");
+
+    free(input);
+    free(target);
+    orion_trainer_free(t);
+    cleanup_weights(wdir);
+    PASS();
+}
+
 #pragma mark - Main
 
 int main(int argc, const char* argv[]) {
@@ -235,6 +275,7 @@ int main(int argc, const char* argv[]) {
         test_single_train_step();
         test_adam_update();
         test_loss_decreases();
+        test_gradient_accumulation();
 
         NSLog(@"\n=== Results: %d passed, %d failed ===", g_pass, g_fail);
         return g_fail > 0 ? 1 : 0;

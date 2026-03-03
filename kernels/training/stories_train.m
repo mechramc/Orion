@@ -407,6 +407,30 @@ void orion_trainer_zero_grads(OrionTrainer* t) {
     memset(t->drms_final, 0, t->cfg->d_model * sizeof(float));
 }
 
+#pragma mark - Scale Grads
+
+static void scale_buffer(float* buf, int count, float scale) {
+    vDSP_vsmul(buf, 1, &scale, buf, 1, count);
+}
+
+void orion_trainer_scale_grads(OrionTrainer* t, float scale) {
+    int d = t->cfg->d_model, h = t->cfg->hidden_dim, v = t->cfg->vocab;
+    for (int L = 0; L < t->n_layers; L++) {
+        OrionLayerGrads *g = &t->grads[L];
+        scale_buffer(g->drms_att, d, scale);
+        scale_buffer(g->dwq, d*d, scale);
+        scale_buffer(g->dwk, d*d, scale);
+        scale_buffer(g->dwv, d*d, scale);
+        scale_buffer(g->dwo, d*d, scale);
+        scale_buffer(g->drms_ffn, d, scale);
+        scale_buffer(g->dw1, h*d, scale);
+        scale_buffer(g->dw3, h*d, scale);
+        scale_buffer(g->dw2, d*h, scale);
+    }
+    scale_buffer(t->dembed, v * d, scale);
+    scale_buffer(t->drms_final, d, scale);
+}
+
 #pragma mark - Training Step
 
 float orion_train_step(OrionTrainer* trainer,

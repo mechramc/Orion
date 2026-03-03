@@ -12,9 +12,9 @@
 - **Session**: 6
 
 ## Current State
-- **Phase**: M3 — Training (18/27 done)
-- **Last completed**: T073 — GCD async dW overlap
-- **Next task**: T074 (Gradient accumulation)
+- **Phase**: M3 — Training (19/27 done)
+- **Last completed**: T074 — Gradient accumulation
+- **Next task**: T075 (Checkpoint save)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Known issues**: ANE compile dominates prefill time (~83%) — program cache (M4) will fix; HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes
