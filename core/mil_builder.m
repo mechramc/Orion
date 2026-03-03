@@ -29,7 +29,7 @@ NSString* orion_mil_header(void) {
            "})]\n";
 }
 
-NSString* orion_mil_program(NSString* body, NSArray<NSString*>* inputs, NSString* output_var) {
+NSString* orion_mil_program_multi(NSString* body, NSArray<NSString*>* inputs, NSArray<NSString*>* output_vars) {
     NSMutableString *m = [NSMutableString string];
     [m appendString:orion_mil_header()];
     [m appendString:@"{\n"];
@@ -46,9 +46,18 @@ NSString* orion_mil_program(NSString* body, NSArray<NSString*>* inputs, NSString
     [m appendString:body];
 
     // Return
-    [m appendFormat:@"    } -> (%@);\n", output_var];
+    [m appendString:@"    } -> ("];
+    for (NSUInteger i = 0; i < output_vars.count; i++) {
+        if (i > 0) [m appendString:@", "];
+        [m appendString:output_vars[i]];
+    }
+    [m appendString:@");\n"];
     [m appendString:@"}\n"];
     return m;
+}
+
+NSString* orion_mil_program(NSString* body, NSArray<NSString*>* inputs, NSString* output_var) {
+    return orion_mil_program_multi(body, inputs, @[output_var]);
 }
 
 #pragma mark - T019: Linear (1×1 Conv)

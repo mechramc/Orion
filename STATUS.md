@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M1 — CPU Baseline Inference (COMPLETE)** — All 35 tasks done. `orion infer` runs GPT-2 124M at 283 tok/s on CPU with profiler. Ready for M2 (ANE prefill). Next: T047-T056.
+**M2 — ANE Prefill Inference (IN PROGRESS)** — M1 complete (35/35). ANE milgen kernels working: attention + FFN compile and eval on ANE with real GPT-2 weights. K output matches CPU within 0.0025 error. Next: T049 (final LN + logits), T051 (prompt padding), T052 (prefill runner).
 
 ## Milestone Progress
 
@@ -66,10 +66,10 @@
 ### M2 — ANE Prefill Inference
 | Task | ID | Size | Status |
 |------|----|------|--------|
-| MIL GPT-2 attn prefill | T047 | L | Pending |
-| MIL GPT-2 FFN prefill | T048 | L | Pending |
+| MIL GPT-2 attn prefill | T047 | L | **DONE** |
+| MIL GPT-2 FFN prefill | T048 | L | **DONE** |
 | MIL final LN + logits | T049 | M | Pending |
-| Bucket selection | T050 | S | Pending |
+| Bucket selection | T050 | S | **DONE** |
 | Prompt padding for ANE | T051 | M | Pending |
 | ANE prefill runner | T052 | XL | Pending |
 | Extract K,V to cache | T053 | M | Pending |
@@ -138,12 +138,12 @@
 ## Task Progress
 - **M0**: 11/11 complete (ALL DONE)
 - **M1**: 35/35 complete (ALL DONE)
-- **M2**: 0/10 complete
+- **M2**: 3/10 complete
 - **M3**: 0/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 46/98 complete (0 in progress)
+- **Grand Total**: 49/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log

@@ -88,4 +88,11 @@ NSString* orion_mil_causal_attention(const char* prefix,
 /// @return Complete MIL program text.
 NSString* orion_mil_program(NSString* body, NSArray<NSString*>* inputs, NSString* output_var);
 
+/// Wrap MIL body with multiple outputs.
+/// @param body        Generated MIL statements
+/// @param inputs      Array of input declarations
+/// @param output_vars Array of output variable names
+/// @return Complete MIL program text.
+NSString* orion_mil_program_multi(NSString* body, NSArray<NSString*>* inputs, NSArray<NSString*>* output_vars);
+
 #endif // ORION_MIL_BUILDER_H

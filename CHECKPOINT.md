@@ -9,18 +9,30 @@
 ## Last Updated By
 - **Tool**: Claude Code
 - **Date**: 2026-03-03
-- **Session**: 2
+- **Session**: 3
 
 ## Current State
-- **Phase**: M2 — ANE Prefill Inference (M1 complete, 35/35)
-- **Last completed**: T043-T046 — Inference golden vectors + profiler (M1 COMPLETE)
-- **Next task**: T047-T056 (ANE GPT-2 prefill kernels + hybrid inference)
+- **Phase**: M2 — ANE Prefill Inference (3/10 tasks done)
+- **Last completed**: T047, T048, T050 — ANE milgen kernels + bucket selection
+- **Next task**: T049 (final LN + logits), T051 (prompt padding), T052 (ANE prefill runner)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Known issues**: ANE minimum tensor size — [1,4,1,4] fails, need [1,256,1,64]+
-- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 27/27
 
-## What Just Happened (Session 2 — CPU Forward Pass)
+## What Just Happened (Session 3 — ANE Prefill Kernels)
+
+### T047, T048, T050: ANE Milgen Kernels + Bucket Selection
+1. **T050**: Bucket selection — `orion_select_bucket()` picks smallest bucket ≥ seq_len from {32,64,128,256,512,1024}
+2. **T047**: MIL GPT-2 attention prefill generator — composes mil_builder helpers into complete per-layer attention program with 3 outputs (hidden, K, V for cache). Added `orion_mil_program_multi` for multi-output MIL programs. Added `orion_make_causal_mask_blob` for causal mask generation.
+3. **T048**: MIL GPT-2 FFN prefill generator — LN2 → FC(768→3072) → GELU → Proj(3072→768) → Residual
+4. **Test**: 27/27 pass — bucket selection, attention compile+eval on ANE, FFN compile+eval, combined attn→FFN, ANE vs CPU comparison (K max error 0.0025)
+5. Weight dict convention: blob paths like `@model_path/layer{i}/wq.bin` → loaded from `model/blobs/gpt2_124m/layer{i}/wq.bin`
+6. Only 5 ANE compiles used per test run (well under ~119 limit)
+
+---
+
+## What Happened Earlier (Session 2 — CPU Forward Pass)
 
 ### T031-T036: CPU GPT-2 Forward Pass
 1. **T031**: `weight_loader.h/m` — reads 196 BLOBFILE blobs (fp16→fp32), loads all GPT-2 124M weights
@@ -212,11 +224,13 @@
 
 ## What To Pick Up Next
 
-### Immediate — Continue M1
-**M2 — ANE Prefill** (T047-T056):
-1. **T047** (L): MIL GPT-2 attention prefill kernel
-2. **T048** (L): MIL GPT-2 FFN prefill kernel
-3. **T052** (XL): ANE prefill runner (compile + eval sequence)
+### Immediate — Continue M2
+**M2 — ANE Prefill** (T049-T056, T047/T048/T050 done):
+1. **T049** (M): Final LayerNorm + logits projection MIL kernel
+2. **T051** (M): Prompt padding + position encoding for bucketed ANE input
+3. **T052** (XL): ANE prefill runner (compile all 12 layers, eval sequentially)
+4. **T053** (M): Extract K,V from ANE into KV cache
+5. **T054** (L): Wire hybrid inference (ANE prefill → CPU decode)
 
 ## Staged But Uncommitted Changes
 None — all changes committed.
