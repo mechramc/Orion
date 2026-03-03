@@ -12,15 +12,25 @@
 - **Session**: 1 (continued)
 
 ## Current State
-- **Phase**: M1 — CPU Baseline Inference (12/35 tasks complete)
-- **Last completed**: T019-T023 — MIL builder helpers (linear, layernorm, rmsnorm, gelu, silu, causal attention, program wrapper)
-- **Next task**: T024 (BLOBFILE writer), T025 (GPT-2 weight converter), T028 (GPT-2 BPE tokenizer)
+- **Phase**: M1 — CPU Baseline Inference (15/35 tasks complete)
+- **Last completed**: T024-T026 — BLOBFILE writer + GPT-2 weight converter (196 files, 237.4 MB fp16)
+- **Next task**: T027 (Stories110M converter), T028 (GPT-2 BPE tokenizer), T031+ (CPU forward pass)
 - **Branch**: `main`
 - **Repo is green**: YES (test_ane_runtime: 11/11 pass)
 - **Known issues**: ANE minimum tensor size — [1,4,1,4] fails, need [1,256,1,64]+
-- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8
 
 ## What Just Happened (Session 1 continued — M1 Core Runtime)
+
+### T024-T026: BLOBFILE Writer + GPT-2 Weight Converter
+1. **T024**: `make_blob_header()` + `convert_tensor_to_blob()` — 128-byte header + fp16 data
+2. **T025**: Full GPT-2 converter: 196 files across 12 layers + embeddings + final LN (237.4 MB fp16)
+   - GPT-2 uses Conv1D (weight is [in, out]) — transpose needed for ANE conv [out, in, 1, 1]
+   - Fused QKV weight split into separate Q, K, V blobs
+3. **T026**: Weight conversion tests: 8/8 pass (header format, round-trip, transpose, file size)
+4. Venv created at `.venv/` with numpy, torch, transformers
+
+---
 
 ### T019-T023: MIL Builder Helpers — ALL PASS
 1. **T019**: `orion_mil_linear` — 1×1 conv with BLOBFILE weight refs (3× faster than matmul on ANE)
@@ -180,7 +190,8 @@ None — all changes committed.
 3. `d9fea4a` — M0 upstream validation: 9/11 tasks complete
 4. `2002a50` — M0 complete: hello MIL + API reference (T008, T009)
 5. `01c3199` — M1 core runtime: IOSurface tensors + ANE compile/eval/release (T012-T018)
-6. `(pending)` — M1 MIL builder helpers: linear, norms, activations, attention (T019-T023)
+6. `d2b4924` — M1 MIL builder helpers: linear, norms, activations, attention (T019-T023)
+7. `(pending)` — M1 weight format: BLOBFILE writer + GPT-2 converter (T024-T026)
 
 ## Warnings for Next Session
 - `vendor/` is gitignored — upstream repos must be cloned locally (`git clone` into `vendor/`)

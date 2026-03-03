@@ -39,9 +39,9 @@
 | MIL gelu/silu | T021 | S | **DONE** |
 | MIL causal attention | T022 | L | **DONE** |
 | MIL program wrapper | T023 | M | **DONE** |
-| BLOBFILE writer | T024 | M | Pending |
-| GPT-2 weight converter | T025 | M | Pending |
-| Weight conversion tests | T026 | S | Pending |
+| BLOBFILE writer | T024 | M | **DONE** |
+| GPT-2 weight converter | T025 | M | **DONE** |
+| Weight conversion tests | T026 | S | **DONE** |
 | Stories weight converter | T027 | M | Pending |
 | GPT-2 BPE tokenizer | T028 | L | Pending |
 | Tokenizer golden vectors | T029 | M | Pending |
@@ -137,13 +137,13 @@
 
 ## Task Progress
 - **M0**: 11/11 complete (ALL DONE)
-- **M1**: 12/35 complete
+- **M1**: 15/35 complete
 - **M2**: 0/10 complete
 - **M3**: 0/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 23/98 complete (0 in progress)
+- **Grand Total**: 26/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log
