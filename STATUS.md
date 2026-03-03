@@ -140,7 +140,7 @@
 |------|----|------|--------|
 | ANE single-token spike | T099 | M | **DONE** |
 | ANE decode forward MIL | T100 | L | **DONE** |
-| ANE decode step | T101 | L | Pending |
+| ANE decode step | T101 | L | **DONE** |
 | Refactor infer to ANE full | T102 | L | Pending |
 | Golden tests (ANE full) | T103 | M | Pending |
 | Benchmark ANE full vs hybrid | T104 | M | Pending |
@@ -177,11 +177,11 @@
 - **M4**: 6/6 complete (ALL DONE)
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Phase 8 (ANE Full Forward)**: 2/6 complete
+- **Phase 8 (ANE Full Forward)**: 3/6 complete
 - **Phase 9 (Benchmarks)**: 0/4 complete
 - **Phase 10 (Abstractions)**: 0/5 complete
 - **Phase 11 (Build Quality)**: 0/3 complete
-- **Grand Total**: 91/116 complete (0 in progress)
+- **Grand Total**: 92/116 complete (0 in progress)
 - **Critical paths**: Training DONE | Weight swap DONE | ANE inference v3: T099→T104 | Benchmarks: T105→T108
 
 ## Decisions Log
@@ -200,6 +200,7 @@
 | 2026-03-03 | v3 spec: Project evolution roadmap | Stage 1 (Core) → Stage 2 (Compiler/auto-tune) → Stage 3 (Platform) |
 | 2026-03-03 | Program cache: store/lookup (not compile-on-miss) | Cache can't know how to compile each kernel type; callers compile on miss and store |
 | 2026-03-03 | Decode uses seq=16 (not seq=1) as minimum ANE bucket | ANE requires ~49KB minimum IOSurface allocation; seq=1 tensors fail at eval even though they compile |
+| 2026-03-03 | ANE multi-output surfaces ordered alphabetically by MIL name | Output surfaces must be provided in alphabetical order of their MIL variable names, not return tuple order |
 
 ## Blockers
 - **None** — M4 complete, Phase 8 ready to start

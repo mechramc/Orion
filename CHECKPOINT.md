@@ -21,7 +21,7 @@
 - **Known issues**: HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes
 - **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 16/16, test_train_smoke 7/7, test_program_cache 42/42
 
-## Session 9 — T100 ANE Decode MIL Generators
+## Session 9 — T100+T101 ANE Decode MIL + Step
 
 ### T100: ANE Decode Forward MIL (DONE)
 - Created `kernels/inference/gpt2_decode_ane.milgen.{h,m}` — MIL generators for single-token ANE decode
@@ -38,21 +38,37 @@
 - Token data at seq position 0, zero-padding at positions 1-15
 - This invalidates T099 spike results which reported seq=1 working (environment may have changed)
 
-### Test Results (tests/test_decode_ane.m, 7/7 pass)
-- MIL generation: correct structure, seq=16 tensors, proper outputs
-- Compile: ~60-70ms per kernel
-- Eval: ~0.15-0.2ms per kernel
-- Per-layer decode: 0.315ms (proj + ffn)
-- Projected 12-layer ANE: 3.8ms (well under 5ms threshold)
-- FFN residual: mean = 0.5000 (exact match expected)
+### T101: ANE Decode Step (DONE)
+- Created `kernels/inference/decode_ane.{h,m}` — full ANE-accelerated decode step
+- Per layer: ANE decode_proj → CPU cross-attention → ANE decode_ffn
+- Final: CPU layernorm + logits (wte too large for ANE)
+- Uses program cache: 24 programs (12 proj + 12 ffn) compiled on first call
+
+### Key Discovery: ANE Multi-Output Surface Alphabetical Ordering
+- **ANE orders multi-output surfaces alphabetically by MIL variable name, NOT by return tuple position**
+- MIL returns `(q32, k32, v32)` but actual output order is `k32, q32, v32` (alphabetical)
+- Fix: provide output surfaces in alphabetical order: `{ioK, ioQ, ioV}`
+- Prefill's multi-output `(attn_res32, k32, v32)` worked by coincidence (already alphabetical)
+
+### Test Results
+- test_decode_ane.m: 7/7 pass (T100 — MIL generators)
+- test_decode_ane_step.m: 3/3 pass (T101 — full decode step)
+  - Greedy tokens match CPU exactly: "Hello" → 11, 314, 1101 (both CPU and ANE)
+  - Logits max diff: 0.31 (expected fp16 tolerance)
+  - Top-5 overlap: 5/5
+  - Performance: 5.5ms per step (cached), 6.0ms first call with compile
+  - 24 programs cached
 
 ### Files Created/Modified
 - `kernels/inference/gpt2_decode_ane.milgen.h` — NEW (decode generator header, ORION_DECODE_SEQ=16)
 - `kernels/inference/gpt2_decode_ane.milgen.m` — NEW (decode MIL generators)
-- `tests/test_decode_ane.m` — NEW (7 tests)
+- `kernels/inference/decode_ane.h` — NEW (ANE decode step header)
+- `kernels/inference/decode_ane.m` — NEW (ANE decode step implementation)
+- `tests/test_decode_ane.m` — NEW (7 tests, T100)
+- `tests/test_decode_ane_step.m` — NEW (3 tests, T101)
 
-### Next: T101 (ANE Decode Step)
-Wire decode kernels into a decode loop: embed token → ANE proj → CPU cross-attention → ANE FFN → sampling
+### Next: T102 (Refactor infer to ANE full forward)
+Wire `orion_ane_decode_step` into the `orion infer` CLI command as `--ane-decode` mode
 
 ---
 
