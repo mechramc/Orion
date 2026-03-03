@@ -138,7 +138,7 @@
 ### Phase 8 — ANE Full Forward Inference (v3)
 | Task | ID | Size | Status |
 |------|----|------|--------|
-| ANE single-token spike | T099 | M | Pending |
+| ANE single-token spike | T099 | M | **DONE** |
 | ANE decode forward MIL | T100 | L | Pending |
 | ANE decode step | T101 | L | Pending |
 | Refactor infer to ANE full | T102 | L | Pending |
@@ -177,11 +177,11 @@
 - **M4**: 6/6 complete (ALL DONE)
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Phase 8 (ANE Full Forward)**: 0/6 complete
+- **Phase 8 (ANE Full Forward)**: 1/6 complete
 - **Phase 9 (Benchmarks)**: 0/4 complete
 - **Phase 10 (Abstractions)**: 0/5 complete
 - **Phase 11 (Build Quality)**: 0/3 complete
-- **Grand Total**: 89/116 complete (0 in progress)
+- **Grand Total**: 90/116 complete (0 in progress)
 - **Critical paths**: Training DONE | Weight swap DONE | ANE inference v3: T099→T104 | Benchmarks: T105→T108
 
 ## Decisions Log
@@ -213,5 +213,5 @@
 | ANE multi-output buffer sizes | Mixed-size outputs fail eval | **SOLVED** — pad all output IOSurfaces to max size |
 | GPT-2 BPE tokenizer complexity | Large task (T028) | **SOLVED** — T028 done |
 | fp16 numerical drift | Golden tests may need relaxed tolerance | **Managed** — two-tier tolerance in golden tests |
-| ANE single-token dispatch overhead | Decode-on-ANE may be slower than CPU | **NEW** — T099 spike will validate; fallback: small-batch decode |
-| ANE minimum tensor size blocks decode | seq_len=1 may not work on ANE | **NEW** — T099 spike will test; fallback: pad to minimum viable size |
+| ANE single-token dispatch overhead | Decode-on-ANE may be slower than CPU | **RESOLVED** — T099: seq=1 eval ~0.03ms for GPT-2 FFN (768→3072→768); well under 5ms threshold |
+| ANE minimum tensor size blocks decode | seq_len=1 may not work on ANE | **RESOLVED** — T099: seq=1 compiles and evals for all program types (add, conv, FFN) |

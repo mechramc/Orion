@@ -12,13 +12,13 @@
 - **Session**: 8 (M4 Weight Swapping)
 
 ## Current State
-- **Phase**: M4 complete (89/116 tasks). Next: Phase 8 (ANE Full Forward Inference) + Phase 9 (Benchmarks)
-- **Last completed**: T084-T089 — M4 Weight Swapping (program cache, eviction, weights_id, bench swap CLI, 100-iter endurance)
-- **Next tasks**: T099 (ANE single-token spike) → T100-T104 (ANE full forward) or T105-T108 (benchmarks)
+- **Phase**: M4 complete + T099 spike done (90/116 tasks). Next: T100-T104 (ANE full forward decode)
+- **Last completed**: T084-T089 (M4), T099 (ANE single-token spike — seq=1 WORKS, ~0.03ms eval)
+- **Next tasks**: T100 (ANE decode MIL generators) → T101-T104 (ANE decode step, refactor, golden tests, benchmark)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Spec version**: ORION_v3_ANE_LLM_SPEC.md (replaces v2)
-- **Known issues**: HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes; ANE single-token dispatch latency unknown (T099 will validate)
+- **Known issues**: HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes
 - **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 16/16, test_train_smoke 7/7, test_program_cache 42/42
 
 ## What Just Happened (Session 8 — M4 Weight Swapping Complete)
@@ -57,6 +57,16 @@
 ### T089: Wire Bench Swap CLI (S)
 - Bench swap fully wired: `./orion bench swap --weights_a A --weights_b B --iters 100` works E2E
 
+### T099: ANE Single-Token Spike (M)
+1. Built `experiments/spike_single_token.m` — tests 3 program types at seq_lens 1,2,4,8,16,32,64
+2. **Simple add [256,s]**: All pass. seq=1 eval 0.048ms
+3. **1x1 conv [768→768,s]**: All pass. seq=1 eval 0.033ms
+4. **FFN [768→3072→768,s]** (GELU decomposed): All pass. seq=1 eval 0.032ms
+5. **R11 RESOLVED**: Single-token dispatch overhead is negligible (~0.03ms vs 5ms threshold)
+6. **R12 RESOLVED**: seq=1 works for all program types with 768+ channels
+7. **BLOBFILE gotcha confirmed**: Header is 128 bytes (not 64); MIL offset uint64(64) is chunk header offset
+8. **v3 ANE full forward inference is FEASIBLE** — no architectural blockers
+
 ### Test Suite
 - New: `tests/test_program_cache.m` — 42 tests (7 test groups)
   - empty_cache, store_and_lookup, store_multiple, evict_by_weights_id, store_replace, evict_nonexistent, cache_with_eval, weights_id_step, weights_id_with_cache
@@ -87,11 +97,10 @@
 - **Memory leaks**: Swap endurance test (T088) validates cache eviction doesn't leak
 
 ### Execution Priority (recommended order)
-1. T099 (ANE single-token spike) — validates v3 inference architecture feasibility
-2. T100-T104 (ANE full forward) — depends on T099 outcome
-3. T105-T108 (Benchmark harness) — M4 unblocked
-4. T114 (Makefile) — reproducible builds
-5. T109-T113 (Runtime abstractions) — can be incremental
+1. T100-T104 (ANE full forward decode) — T099 validated feasibility
+2. T105-T108 (Benchmark harness) — M4 unblocked
+3. T114 (Makefile) — reproducible builds
+4. T109-T113 (Runtime abstractions) — can be incremental
 
 ### T079-T080: CLI Train Command
 1. Rewrote `apps/cli/commands/train.m` — full E2E training command
