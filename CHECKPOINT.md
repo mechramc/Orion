@@ -12,14 +12,14 @@
 - **Session**: 8 (M4 Weight Swapping)
 
 ## Current State
-- **Phase**: M4 complete + T099 spike done (90/116 tasks). Next: T100-T104 (ANE full forward decode)
-- **Last completed**: T084-T089 (M4), T099 (ANE single-token spike — seq=1 WORKS, ~0.03ms eval)
-- **Next tasks**: T100 (ANE decode MIL generators) → T101-T104 (ANE decode step, refactor, golden tests, benchmark)
+- **Phase**: Phase 8 complete (95/116 tasks). Next: T105-T108 (Benchmark Harness)
+- **Last completed**: T100-T104 (ANE full forward inference — all done)
+- **Next tasks**: T105 (bench kernels) → T106 (bench inference) → T107 (bench training) → T108 (regression tracking)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Spec version**: ORION_v3_ANE_LLM_SPEC.md (replaces v2)
-- **Known issues**: HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes
-- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 16/16, test_train_smoke 7/7, test_program_cache 42/42
+- **Known issues**: HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes; ANE multi-output surfaces ordered alphabetically by MIL variable name
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 16/16, test_train_smoke 7/7, test_program_cache 42/42, test_decode_ane 7/7, test_decode_ane_step 3/3, test_infer_golden_ane 4/4
 
 ## Session 9 — T100+T101 ANE Decode MIL + Step
 
@@ -67,8 +67,37 @@
 - `tests/test_decode_ane.m` — NEW (7 tests, T100)
 - `tests/test_decode_ane_step.m` — NEW (3 tests, T101)
 
-### Next: T102 (Refactor infer to ANE full forward)
-Wire `orion_ane_decode_step` into the `orion infer` CLI command as `--ane-decode` mode
+### T102: Wire ANE Decode into CLI (DONE)
+- Modified `apps/cli/commands/infer.m` — three inference modes:
+  - `--ane`: ANE full forward (prefill + decode, v3 mode)
+  - `--ane-prefill`: ANE prefill + CPU decode (v2 mode)
+  - Default: CPU only
+- Fallback to CPU if ANE decode fails mid-generation
+- All three modes produce identical output
+
+### T103: ANE Full Forward Golden Tests (DONE)
+- Created `tests/test_infer_golden_ane.m` — 4 tests, all pass
+- "Hello" → 5 tokens exact match with golden vectors
+- "The quick brown fox" → "jumps" exact match
+- ANE vs CPU: 10-token generation exact match for two prompts
+- All tests use CPU prefill + ANE decode steps
+
+### T104: Benchmark ANE Full Forward vs CPU (DONE)
+- Created `tests/test_bench_decode.m` — benchmark with 20 iterations
+- **CPU decode**: avg=3.52ms p50=3.48ms p90=3.88ms
+- **ANE decode (cached)**: avg=5.78ms p50=5.76ms p90=6.06ms
+- **ANE compile**: 1015ms one-time for 24 programs (12 proj + 12 ffn)
+- **RSS delta**: ~85MB additional for ANE (566→651 MB)
+- **ANE overhead**: ~2.3ms vs CPU (IOSurface round-trips)
+- Greedy tokens match CPU exactly
+
+### Phase 8 Complete (6/6)
+- T099: ANE single-token spike ✓
+- T100: ANE decode MIL generators ✓
+- T101: ANE decode step ✓
+- T102: Wire ANE decode into CLI ✓
+- T103: Golden tests ✓
+- T104: Benchmark ✓
 
 ---
 

@@ -143,7 +143,7 @@
 | ANE decode step | T101 | L | **DONE** |
 | Refactor infer to ANE full | T102 | L | **DONE** |
 | Golden tests (ANE full) | T103 | M | **DONE** |
-| Benchmark ANE full vs hybrid | T104 | M | Pending |
+| Benchmark ANE full vs hybrid | T104 | M | **DONE** |
 
 ### Phase 9 — Benchmark Harness (v3)
 | Task | ID | Size | Status |
@@ -177,12 +177,12 @@
 - **M4**: 6/6 complete (ALL DONE)
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Phase 8 (ANE Full Forward)**: 5/6 complete
+- **Phase 8 (ANE Full Forward)**: 6/6 complete (ALL DONE)
 - **Phase 9 (Benchmarks)**: 0/4 complete
 - **Phase 10 (Abstractions)**: 0/5 complete
 - **Phase 11 (Build Quality)**: 0/3 complete
-- **Grand Total**: 94/116 complete (0 in progress)
-- **Critical paths**: Training DONE | Weight swap DONE | ANE inference v3: T099→T104 | Benchmarks: T105→T108
+- **Grand Total**: 95/116 complete (0 in progress)
+- **Critical paths**: Training DONE | Weight swap DONE | ANE inference v3 DONE | Benchmarks: T105→T108
 
 ## Decisions Log
 | Date | Decision | Rationale |
