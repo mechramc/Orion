@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M2 — ANE Prefill Inference (COMPLETE)** — All 10 tasks done. Full 12-layer ANE prefill on Neural Engine, hybrid inference (ANE prefill → CPU decode) wired into CLI with `--ane` flag. Golden vectors exact match. Ready for M3 (Training).
+**M3 — Training (IN PROGRESS)** — CPU training ops done (T057-T061), SentencePiece tokenizer (T062), data loader (T063). Next: ANE training kernels (T064-T071).
 
 ## Milestone Progress
 
@@ -80,13 +80,13 @@
 ### M3 — Training (Stories110M)
 | Task | ID | Size | Status |
 |------|----|------|--------|
-| CPU RMSNorm | T057 | M | Pending |
-| CPU cross-entropy | T058 | M | Pending |
-| CPU embedding | T059 | S | Pending |
-| CPU Adam | T060 | M | Pending |
-| CPU dW accum (cblas) | T061 | M | Pending |
-| SentencePiece tokenizer | T062 | M | Pending |
-| Data loader | T063 | M | Pending |
+| CPU RMSNorm | T057 | M | **DONE** |
+| CPU cross-entropy | T058 | M | **DONE** |
+| CPU embedding | T059 | S | **DONE** |
+| CPU Adam | T060 | M | **DONE** |
+| CPU dW accum (cblas) | T061 | M | **DONE** |
+| SentencePiece tokenizer | T062 | M | **DONE** |
+| Data loader | T063 | M | **DONE** |
 | MIL fwdAttn kernel | T064 | L | Pending |
 | MIL fwdFFN kernel | T065 | L | Pending |
 | MIL ffnBwd kernel | T066 | L | Pending |
@@ -139,11 +139,11 @@
 - **M0**: 11/11 complete (ALL DONE)
 - **M1**: 35/35 complete (ALL DONE)
 - **M2**: 10/10 complete (ALL DONE)
-- **M3**: 0/27 complete
+- **M3**: 7/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 56/98 complete (0 in progress)
+- **Grand Total**: 63/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log

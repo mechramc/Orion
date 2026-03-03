@@ -9,18 +9,40 @@
 ## Last Updated By
 - **Tool**: Claude Code
 - **Date**: 2026-03-03
-- **Session**: 3
+- **Session**: 4
 
 ## Current State
-- **Phase**: M3 — Training (M2 complete, 10/10)
-- **Last completed**: T047-T056 — ANE Prefill Inference (M2 COMPLETE)
-- **Next task**: T057-T083 (Training on ANE)
+- **Phase**: M3 — Training (7/27 done)
+- **Last completed**: T057-T063 — CPU training ops + tokenizer + data loader
+- **Next task**: T064-T071 (ANE training kernels)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
-- **Known issues**: ANE compile dominates prefill time (~83%) — program cache (M4) will fix
-- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34
+- **Known issues**: ANE compile dominates prefill time (~83%) — program cache (M4) will fix; HuggingFace auth needed for TinyStories data download
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7
 
-## What Just Happened (Session 3 — ANE Prefill Kernels)
+## What Just Happened (Session 4 — M3 CPU Training Foundation)
+
+### T057-T061: CPU Training Ops
+1. **T057**: `orion_cpu_rmsnorm` — vDSP_dotpr for sum-of-squares, normalize by 1/sqrt(ss/dim + eps), then scale by weight
+2. **T058**: `orion_cpu_cross_entropy` — softmax with max-subtraction for numerical stability, NLL loss, gradient = softmax - one_hot (averaged over seq_len)
+3. **T059**: `orion_cpu_embedding` — simple memcpy table lookup per token
+4. **T060**: `orion_cpu_adam_step` — Adam with bias correction: lr_t = lr * sqrt(1-beta2^t) / (1-beta1^t), then m,v update + param step
+5. **T061**: `orion_cpu_dw_accum` — cblas_sgemm with CblasTrans for x^T @ dy, beta=1.0 for accumulation
+6. **Test**: 19/19 pass — RMSNorm (4 tests), cross-entropy (5 tests), embedding (2 tests), Adam (4 tests including convergence on quadratic), dW accum (4 tests including 256×768×768 dimensions)
+
+### T062: SentencePiece Tokenizer
+7. **T062**: Reads Karpathy's tokenizer.bin format (max_token_len + N*(score+len+chars)). Implements BPE encoding: preprocess text with ▁ prefix and space→▁ replacement, initialize per-character tokens, greedy merge by highest score. Decode handles ▁→space and <0xNN> byte tokens.
+8. Downloaded llama2_tokenizer.model from Karpathy's repo, exported to tokenizer_32k.bin (466KB, 32000 tokens)
+9. **Test**: 7/7 pass — exact match with Python SentencePiece reference (encode "Once upon a time..." → [9038, 2501, 263, 931, 727, 471, 263, 2217, 7826]), roundtrip verified
+
+### T063: Data Loader
+10. **T063**: Memory-mapped data loader for pretokenized uint16 binary files. Produces (input, target) pairs where target = input shifted by 1. Supports reset and wrap-around.
+11. Created synthetic test data (1010 tokens, 10 documents) since HuggingFace download requires auth
+12. **Test**: 7/7 pass — open, batch production, target shift verification, multiple batches, reset, boundary checks
+
+---
+
+## What Happened Earlier (Session 3 — ANE Prefill Kernels)
 
 ### T047, T048, T050: ANE Milgen Kernels + Bucket Selection
 1. **T050**: Bucket selection — `orion_select_bucket()` picks smallest bucket ≥ seq_len from {32,64,128,256,512,1024}
