@@ -9,16 +9,40 @@
 ## Last Updated By
 - **Tool**: Claude Code
 - **Date**: 2026-03-03
-- **Session**: 4
+- **Session**: 5
 
 ## Current State
-- **Phase**: M3 — Training (7/27 done)
-- **Last completed**: T057-T063 — CPU training ops + tokenizer + data loader
-- **Next task**: T064-T071 (ANE training kernels)
+- **Phase**: M3 — Training (15/27 done)
+- **Last completed**: T064-T071 — ANE training kernels (all 6 kernel types + classifier + softmax)
+- **Next task**: T072 (Single training step — XL)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
-- **Known issues**: ANE compile dominates prefill time (~83%) — program cache (M4) will fix; HuggingFace auth needed for TinyStories data download
-- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7
+- **Known issues**: ANE compile dominates prefill time (~83%) — program cache (M4) will fix; HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 15/15
+
+## What Just Happened (Session 5 — M3 ANE Training Kernels)
+
+### T064-T071: ANE Training Kernels
+1. **T064**: `orion_milgen_fwd_attn` — RMSNorm → QKV → causal attention → Wo. 6 multi-output taps (oo, qf, kf, vf, af, xn) for backward pass activation reuse.
+2. **T065**: `orion_milgen_fwd_ffn` — RMSNorm → W1, W3 parallel → SiLU(h1) * h3 → W2. 5 multi-output taps (y, h1, h3, gt, xn).
+3. **T066**: `orion_milgen_ffn_bwd` — SiLU backward chain rule: sig(h1)*(1+h1*(1-sig(h1))) through W2^T, W1^T, W3^T. 3 outputs (dx, dh1, dh3).
+4. **T067**: `orion_milgen_sdpa_bwd1` — Wo^T → reshape to multi-head → recompute attention forward → dV = P^T @ da, dp = da @ V^T. 3 outputs (dvf, pf, dpf).
+5. **T068**: `orion_milgen_sdpa_bwd2` — Softmax backward: ds = P * (dp - sum(P*dp)) scaled → dQ = ds @ K, dK = ds^T @ Q. Weight-free. 2 outputs (dqf, dkf).
+6. **T069**: `orion_milgen_qkv_bwd` — Wq^T + Wk^T + Wv^T → sum → dx. Single output.
+7. **T070**: `orion_milgen_classifier_fwd` — embed^T @ hidden → logits via conv [vocab, dim, 1, 1].
+8. **T071**: `orion_milgen_vocab_softmax` — softmax(axis=1) over 32000 vocab classes.
+
+### Key Finding: ANE Rejects concat MIL Op
+- Initial implementation used `concat(axis=1, values=(...))` to bundle multiple output tensors into one IOSurface. All kernels using concat failed with `ANECCompile() FAILED: err=()`.
+- `qkvBwd` (single summed output, no concat) was the only kernel that compiled.
+- **Fix**: Replaced concat with `orion_mil_program_multi()` — returns separate IOSurface per output. All 7 kernels now compile and eval successfully.
+- Added `orion_tensor_create_f32` and `orion_tensor_read_f32_direct` for fp32 output surfaces (training kernels cast to fp32 for gradient precision).
+
+### Test Results
+- **test_train_kernels**: 15/15 pass — 7 milgen tests, 7 compile tests, 1 eval test (fwdAttn with 6 fp32 outputs verified finite)
+- 7 successful ANE compiles in one process
+
+---
 
 ## What Just Happened (Session 4 — M3 CPU Training Foundation)
 
@@ -256,13 +280,14 @@
 
 ## What To Pick Up Next
 
-### Immediate — Start M3 (Training)
-**M3 — Training on ANE** (T057-T083, 0/27 done):
-1. **T057** (M): CPU RMSNorm
-2. **T058** (M): CPU cross-entropy loss
-3. **T062** (M): SentencePiece tokenizer wrapper
-4. **T063** (M): Data loader for TinyStories
-5. **T064-T071** (L): MIL training kernels (forward + backward)
+### Immediate — Continue M3 (Training Step Wiring)
+**M3 — Training on ANE** (T057-T083, 15/27 done):
+1. **T072** (XL): Single training step — forward (ANE) → loss (CPU) → backward (ANE) → dW (CPU) → Adam
+2. **T073** (M): GCD async dW overlap (compute dW on CPU while ANE runs next layer)
+3. **T074** (M): Gradient accumulation across microbatches
+4. **T075-T076** (L): Checkpoint save/resume
+5. **T077** (L): exec() restart at ~119 compile limit
+6. **T078** (L): Recompile ANE programs after Adam weight update
 
 ## Staged But Uncommitted Changes
 None — all changes committed.

@@ -27,6 +27,24 @@ IOSurfaceRef orion_tensor_create(int channels, int seq_len) {
     return IOSurfaceCreate((__bridge CFDictionaryRef)props);
 }
 
+IOSurfaceRef orion_tensor_create_f32(int channels, int seq_len) {
+    if (channels <= 0 || seq_len <= 0) return NULL;
+
+    // fp32: 4 bytes per element
+    size_t bytes = (size_t)channels * seq_len * sizeof(float);
+
+    NSDictionary *props = @{
+        (id)kIOSurfaceWidth:           @(bytes),
+        (id)kIOSurfaceHeight:          @1,
+        (id)kIOSurfaceBytesPerElement:  @1,
+        (id)kIOSurfaceBytesPerRow:      @(bytes),
+        (id)kIOSurfaceAllocSize:        @(bytes),
+        (id)kIOSurfacePixelFormat:      @0
+    };
+
+    return IOSurfaceCreate((__bridge CFDictionaryRef)props);
+}
+
 #pragma mark - T013: Raw fp16 Read/Write
 
 void orion_tensor_write(IOSurfaceRef surface, const void* data, size_t size) {
@@ -83,6 +101,13 @@ void orion_tensor_read_f32(IOSurfaceRef surface, float* data, int count) {
         data[i] = (float)src[i];
     }
 
+    IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, NULL);
+}
+
+void orion_tensor_read_f32_direct(IOSurfaceRef surface, float* data, int count) {
+    if (!surface || !data || count <= 0) return;
+    IOSurfaceLock(surface, kIOSurfaceLockReadOnly, NULL);
+    memcpy(data, IOSurfaceGetBaseAddress(surface), (size_t)count * sizeof(float));
     IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, NULL);
 }
 

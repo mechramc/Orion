@@ -10,6 +10,10 @@
 /// @return IOSurface reference, or NULL on failure. Caller must CFRelease.
 IOSurfaceRef orion_tensor_create(int channels, int seq_len);
 
+/// Create an IOSurface-backed fp32 tensor in ANE layout [1, C, 1, S].
+/// Used for training kernel outputs that cast to fp32 for gradient precision.
+IOSurfaceRef orion_tensor_create_f32(int channels, int seq_len);
+
 /// Copy fp16 data into an IOSurface tensor.
 /// @param surface Target IOSurface
 /// @param data    Source fp16 data (row-major)
@@ -27,6 +31,10 @@ void orion_tensor_write_f32(IOSurfaceRef surface, const float* data, int count);
 
 /// Read IOSurface fp16 data and convert to float32.
 void orion_tensor_read_f32(IOSurfaceRef surface, float* data, int count);
+
+/// Read fp32 data directly from an IOSurface (no conversion).
+/// Used with orion_tensor_create_f32 output surfaces.
+void orion_tensor_read_f32_direct(IOSurfaceRef surface, float* data, int count);
 
 /// Release an IOSurface tensor.
 void orion_tensor_release(IOSurfaceRef surface);

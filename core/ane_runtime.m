@@ -99,6 +99,7 @@ OrionProgram* orion_compile_mil(
         BOOL ok = ((BOOL(*)(id,SEL,unsigned int,id,NSError**))objc_msgSend)(
             model, @selector(compileWithQoS:options:error:), 21, @{}, &e);
         if (!ok) {
+            if (e) NSLog(@"ANE compile error: %@", e);
             [fm removeItemAtPath:tmpDir error:nil];
             return NULL;
         }

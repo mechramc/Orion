@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M3 — Training (IN PROGRESS)** — CPU training ops done (T057-T061), SentencePiece tokenizer (T062), data loader (T063). Next: ANE training kernels (T064-T071).
+**M3 — Training (IN PROGRESS)** — CPU training ops (T057-T061), tokenizer (T062), data loader (T063), ANE training kernels (T064-T071) all done. Next: training step wiring (T072+).
 
 ## Milestone Progress
 
@@ -87,14 +87,14 @@
 | CPU dW accum (cblas) | T061 | M | **DONE** |
 | SentencePiece tokenizer | T062 | M | **DONE** |
 | Data loader | T063 | M | **DONE** |
-| MIL fwdAttn kernel | T064 | L | Pending |
-| MIL fwdFFN kernel | T065 | L | Pending |
-| MIL ffnBwd kernel | T066 | L | Pending |
-| MIL sdpaBwd1 kernel | T067 | L | Pending |
-| MIL sdpaBwd2 kernel | T068 | M | Pending |
-| MIL qkvBwd kernel | T069 | L | Pending |
-| MIL classifier fwd | T070 | M | Pending |
-| MIL vocab softmax | T071 | M | Pending |
+| MIL fwdAttn kernel | T064 | L | **DONE** |
+| MIL fwdFFN kernel | T065 | L | **DONE** |
+| MIL ffnBwd kernel | T066 | L | **DONE** |
+| MIL sdpaBwd1 kernel | T067 | L | **DONE** |
+| MIL sdpaBwd2 kernel | T068 | M | **DONE** |
+| MIL qkvBwd kernel | T069 | L | **DONE** |
+| MIL classifier fwd | T070 | M | **DONE** |
+| MIL vocab softmax | T071 | M | **DONE** |
 | Single training step | T072 | XL | Pending |
 | GCD async dW overlap | T073 | M | Pending |
 | Gradient accumulation | T074 | M | Pending |
@@ -139,11 +139,11 @@
 - **M0**: 11/11 complete (ALL DONE)
 - **M1**: 35/35 complete (ALL DONE)
 - **M2**: 10/10 complete (ALL DONE)
-- **M3**: 7/27 complete
+- **M3**: 15/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 63/98 complete (0 in progress)
+- **Grand Total**: 71/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log
@@ -154,6 +154,7 @@
 | 2026-03-03 | GPT-2 for inference demo, Stories110M for training | GPT-2 is widely reproducible; Stories matches ANEgpt upstream |
 | 2026-03-03 | Mode A (recompile) before Mode B (LoRA) | Recompile is proven in upstream; LoRA is experimental |
 | 2026-03-03 | ANEgpt checkpoint format (CkptHdr) | Compatibility with upstream; proven to work |
+| 2026-03-03 | Multi-output instead of concat for training kernels | ANE compiler rejects concat along axis=1; multi-output via orion_mil_program_multi works |
 
 ## Blockers
 - **None** — M0 complete, ready for M1
