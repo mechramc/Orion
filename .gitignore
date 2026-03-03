@@ -1,0 +1,31 @@
+# Build
+build/
+DerivedData/
+*.xcworkspace
+xcuserdata/
+*.o
+*.a
+*.dylib
+
+# Weight blobs (large binary files)
+model/blobs/*
+!model/blobs/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+*.swp
+*~
+
+# IDE
+.vscode/
+.idea/
+
+# Checkpoints
+checkpoints/
+*.ckpt

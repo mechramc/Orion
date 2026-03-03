@@ -1,0 +1,6 @@
+{
+  "_comment": "Golden test vectors for inference. Fixed prompts + seeds → expected token sequences.",
+  "_model": "gpt2_124m",
+  "_note": "Populate after M1 (CPU baseline) is working. Two tolerance tiers: exact + top-k fallback for fp16 drift.",
+  "tests": []
+}
