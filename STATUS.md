@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M3 — Training (IN PROGRESS)** — CPU training ops (T057-T061), tokenizer (T062), data loader (T063), ANE training kernels (T064-T071), single training step (T072) all done. Next: GCD async dW overlap (T073+).
+**M3 — Training (COMPLETE)** — All 27 tasks done. CPU ops, ANE kernels, gradient accumulation, checkpointing, recompile, CLI E2E, profiler. Next: M4 Weight Swapping.
 
 ## Milestone Progress
 
@@ -102,9 +102,9 @@
 | Checkpoint resume | T076 | L | **DONE** |
 | exec() restart | T077 | L | **DONE** |
 | Recompile after Adam | T078 | L | **DONE** |
-| CLI arg parsing (train) | T079 | M | Pending |
-| Wire orion train E2E | T080 | L | Pending |
-| Training profiler | T081 | S | Pending |
+| CLI arg parsing (train) | T079 | M | **DONE** |
+| Wire orion train E2E | T080 | L | **DONE** |
+| Training profiler | T081 | S | **DONE** |
 | Training smoke test | T082 | M | **DONE** |
 | Checkpoint resume test | T083 | M | **DONE** |
 
@@ -139,11 +139,11 @@
 - **M0**: 11/11 complete (ALL DONE)
 - **M1**: 35/35 complete (ALL DONE)
 - **M2**: 10/10 complete (ALL DONE)
-- **M3**: 24/27 complete
+- **M3**: 27/27 complete (ALL DONE)
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 80/98 complete (0 in progress)
+- **Grand Total**: 83/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log

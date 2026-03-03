@@ -16,6 +16,13 @@ tests/test_mil_builder
 tests/test_cpu_forward
 tests/test_decode
 tests/test_tokenizer
+tests/test_ane_prefill
+tests/test_cpu_training_ops
+tests/test_data_loader
+tests/test_infer_golden
+tests/test_sp_tokenizer
+tests/test_train_kernels
+tests/test_train_smoke
 tests/*.dSYM/
 
 # Weight blobs (large binary files)

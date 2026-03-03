@@ -9,16 +9,36 @@
 ## Last Updated By
 - **Tool**: Claude Code
 - **Date**: 2026-03-03
-- **Session**: 6
+- **Session**: 7
 
 ## Current State
-- **Phase**: M3 — Training (24/27 done)
-- **Last completed**: T077-T078 — exec() restart + recompile after Adam
-- **Next task**: T079 (CLI arg parsing for train)
+- **Phase**: M3 — Training (ALL DONE, 27/27). Next: M4 — Weight Swapping
+- **Last completed**: T079-T081 — CLI train command + profiler
+- **Next task**: T084 (Program cache) — start of M4
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Known issues**: ANE compile dominates prefill time (~83%) — program cache (M4) will fix; HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes
-- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 16/16, test_train_smoke 4/4
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 16/16, test_train_smoke 7/7
+
+## What Just Happened (Session 7 — M3 Completion)
+
+### T079-T080: CLI Train Command
+1. Rewrote `apps/cli/commands/train.m` — full E2E training command
+2. `TrainArgs` struct + `parse_train_args` — all CLI flags: --weights, --dataset, --checkpoint_dir, --resume, --steps, --grad_accum, --checkpoint_every, --lr, --seq, --help
+3. `orion_cmd_train` — full training loop: create trainer → resume checkpoint → open data loader → gradient accumulation → scale → Adam → checkpoint → budget check → recompile
+4. Removed unnecessary `input16`/`target16` intermediate buffers (data loader already outputs `int*`)
+5. Already wired in `apps/cli/main.m` via `extern` declaration
+
+### T081: Training Profiler
+1. Added `estimate_step_flops` — estimates FLOPS per training step: 6 * params * seq_len * grad_accum
+2. Per-step output enhanced: `step N | loss X | Y ms | Z TFLOPS`
+3. Separate timing for train (fwd+bwd+dW+Adam) vs recompile
+4. Summary at end: steps, final loss, total time, avg train ms, avg recompile ms, avg TFLOPS, compile time %, recompile %
+
+### Build
+- Full `orion` binary rebuilt with all source files (26 .m files)
+- Build command: `xcrun clang -O2 -fobjc-arc -DACCELERATE_NEW_LAPACK -framework Foundation -framework IOSurface -framework Accelerate -ldl -I .`
+- `./orion train --help` verified, all error cases verified
 
 ## What Just Happened (Session 6 — M3 Training Step)
 
@@ -335,14 +355,14 @@
 
 ## What To Pick Up Next
 
-### Immediate — Continue M3 (Training Step Wiring)
-**M3 — Training on ANE** (T057-T083, 15/27 done):
-1. **T072** (XL): Single training step — forward (ANE) → loss (CPU) → backward (ANE) → dW (CPU) → Adam
-2. **T073** (M): GCD async dW overlap (compute dW on CPU while ANE runs next layer)
-3. **T074** (M): Gradient accumulation across microbatches
-4. **T075-T076** (L): Checkpoint save/resume
-5. **T077** (L): exec() restart at ~119 compile limit
-6. **T078** (L): Recompile ANE programs after Adam weight update
+### Immediate — Start M4 (Weight Swapping)
+**M4 — Weight Swapping** (T084-T089, 0/6 done):
+1. **T084** (L): Program cache — cache compiled ANE programs to avoid recompilation
+2. **T085** (M): Cache eviction — LRU/LFU eviction when cache exceeds budget
+3. **T086** (M): weights_id abstraction — unique identifier for weight sets
+4. **T087** (M): CLI bench swap args
+5. **T088** (XL): Swap endurance test — 100 alternations, no memory leak
+6. **T089** (S): Wire bench swap CLI
 
 ## Staged But Uncommitted Changes
 None — all changes committed.
