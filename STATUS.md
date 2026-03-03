@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**M0 — Upstream Validation — COMPLETE** — All 11 tasks done. Both upstreams validated, hello MIL proven on ANE ([1,256,1,64] add: 17.1ms compile, 0.223ms eval), API reference documented. Ready for M1.
+**M1 — CPU Baseline Inference (in progress)** — M0 complete. Core runtime (IOSurface tensors + ANE compile/eval/release) implemented and tested (11/11 pass). Next: MIL builder helpers (T019-T023), weight format (T024-T027), tokenizer (T028-T030).
 
 ## Milestone Progress
 
@@ -27,13 +27,13 @@
 ### M1 — CPU Baseline Inference
 | Task | ID | Size | Status |
 |------|----|------|--------|
-| IOSurface tensor create | T012 | M | Pending |
-| IOSurface read/write | T013 | S | Pending |
-| fp16↔fp32 NEON conversion | T014 | M | Pending |
-| orion_compile_mil | T015 | L | Pending |
-| orion_eval | T016 | M | Pending |
-| orion_release_program | T017 | M | Pending |
-| ANE runtime integration test | T018 | S | Pending |
+| IOSurface tensor create | T012 | M | **DONE** |
+| IOSurface read/write | T013 | S | **DONE** |
+| fp16↔fp32 NEON conversion | T014 | M | **DONE** |
+| orion_compile_mil | T015 | L | **DONE** |
+| orion_eval | T016 | M | **DONE** |
+| orion_release_program | T017 | M | **DONE** |
+| ANE runtime integration test | T018 | S | **DONE** |
 | MIL linear helper | T019 | M | Pending |
 | MIL layernorm/rmsnorm | T020 | M | Pending |
 | MIL gelu/silu | T021 | S | Pending |
@@ -137,13 +137,13 @@
 
 ## Task Progress
 - **M0**: 11/11 complete (ALL DONE)
-- **M1**: 0/35 complete
+- **M1**: 7/35 complete
 - **M2**: 0/10 complete
 - **M3**: 0/27 complete
 - **M4**: 0/6 complete
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Grand Total**: 11/98 complete (0 in progress)
+- **Grand Total**: 18/98 complete (0 in progress)
 - **Critical path**: T001 → T008 → T015 → T019 → T047 → T052 → T054
 
 ## Decisions Log

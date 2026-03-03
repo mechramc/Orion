@@ -12,15 +12,33 @@
 - **Session**: 1 (continued)
 
 ## Current State
-- **Phase**: M0 — COMPLETE (11/11 tasks). Ready for M1 (CPU Baseline Inference).
-- **Last completed**: T008 (Hello MIL — PASS), T009 (ANE API reference)
-- **Next task**: M1 — T012 (IOSurface tensor create), T028 (GPT-2 BPE tokenizer, parallel)
+- **Phase**: M1 — CPU Baseline Inference (7/35 tasks complete)
+- **Last completed**: T012-T018 — Core runtime (IOSurface tensors + ANE compile/eval/release)
+- **Next task**: T019 (MIL linear helper), T024 (BLOBFILE writer), T028 (GPT-2 BPE tokenizer)
 - **Branch**: `main`
-- **Repo is green**: YES (hello_mil.m passes on ANE)
+- **Repo is green**: YES (test_ane_runtime: 11/11 pass)
 - **Known issues**: ANE minimum tensor size — [1,4,1,4] fails, need [1,256,1,64]+
-- **Tests passing**: N/A (no Orion test suite yet)
+- **Tests passing**: tests/test_ane_runtime — 11/11 PASS
 
-## What Just Happened (Session 1 continued — M0 Complete)
+## What Just Happened (Session 1 continued — M1 Core Runtime)
+
+### T012-T018: Core Runtime Foundation — ALL PASS
+1. **T012**: `orion_tensor_create` — creates IOSurface with ANE layout [1,C,1,S] fp16
+2. **T013**: `orion_tensor_write/read` — raw fp16 lock/memcpy/unlock
+3. **T014**: `orion_tensor_write_f32/read_f32` — NEON-accelerated fp16↔fp32 (max error 0.001875)
+4. **T015**: `orion_compile_mil` — full pipeline: descriptor → temp dir → compile → load (returns OrionProgram*)
+5. **T016**: `orion_eval` — wraps IOSurfaces as _ANEIOSurfaceObject, builds _ANERequest, evaluates
+6. **T017**: `orion_release_program` — unloads from ANE, cleans temp dir, releases retained refs
+7. **T018**: Integration test (`tests/test_ane_runtime.m`): 11/11 pass
+   - Init (idempotent), tensor round-trip, add eval, scale eval, 10× compile+release loop
+
+### API Design Decisions
+- `OrionProgram` uses `void*` with `CFBridgingRetain/Release` for manual ARC in C struct
+- Weight dict passed as `NSDictionary*` (matches upstream pattern directly)
+- `orion_ane_init()` must be called once before any compile/eval
+- `orion_compile_count()` tracks approach to ~119 limit
+
+---
 
 ### T008: Hello MIL Proof-of-Concept — PASS
 1. Wrote `experiments/hello_mil.m` — standalone program that compiles `z = add(x, y)` on ANE
@@ -122,16 +140,21 @@
 
 ## What To Pick Up Next
 
-### Immediate — Begin M1 (CPU Baseline Inference)
-1. **T012** (M): IOSurface tensor create — `core/iosurface_tensor.m`
-2. **T013** (S): IOSurface read/write — implement surface_write_f32/read_f32
-3. **T014** (M): fp16↔fp32 NEON conversion — NEON-accelerated cvt functions
-4. **T015** (L): orion_compile_mil — wrap hello_mil pattern into reusable API
-5. **T028** (L): GPT-2 BPE tokenizer — can start in parallel (no deps)
+### Immediate — Continue M1
+**MIL Builder Helpers** (T019-T023):
+1. **T019** (M): `orion_mil_linear` — generate MIL for Y = conv(W, X) with BLOBFILE weights
+2. **T020** (M): `orion_mil_layernorm` + `orion_mil_rmsnorm`
+3. **T021** (S): `orion_mil_gelu` + `orion_mil_silu`
+4. **T022** (L): `orion_mil_causal_attention` — decomposed (no SDPA)
+5. **T023** (M): `orion_mil_program` — wrapper to compose ops
 
-### Dependency Chain
-T012 → T013 → T014 → T015 → T016 → T018 (core ANE runtime)
-T028 → T029 → T030 (tokenizer, independent)
+**Weight Format** (T024-T027, parallel):
+1. **T024** (M): BLOBFILE writer (128-byte header + fp16 data)
+2. **T025** (M): GPT-2 HF→BLOBFILE converter
+3. **T027** (M): Stories110M converter
+
+**Tokenizer** (T028-T030, parallel):
+1. **T028** (L): GPT-2 BPE tokenizer in Obj-C
 
 ## Staged But Uncommitted Changes
 None — all changes committed.
@@ -140,7 +163,8 @@ None — all changes committed.
 1. `71119b0` — Initial repo scaffold with full project structure and updated spec
 2. `1e9f330` — Add atomic task list with 94 tasks across 7 phases
 3. `d9fea4a` — M0 upstream validation: 9/11 tasks complete
-4. `(pending)` — M0 complete: hello MIL + API reference (T008, T009)
+4. `2002a50` — M0 complete: hello MIL + API reference (T008, T009)
+5. `(pending)` — M1 core runtime: IOSurface tensors + ANE compile/eval/release (T012-T018)
 
 ## Warnings for Next Session
 - `vendor/` is gitignored — upstream repos must be cloned locally (`git clone` into `vendor/`)
