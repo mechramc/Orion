@@ -12,15 +12,22 @@
 - **Session**: 1 (continued)
 
 ## Current State
-- **Phase**: M1 — CPU Baseline Inference (15/35 tasks complete)
-- **Last completed**: T024-T026 — BLOBFILE writer + GPT-2 weight converter (196 files, 237.4 MB fp16)
-- **Next task**: T027 (Stories110M converter), T028 (GPT-2 BPE tokenizer), T031+ (CPU forward pass)
+- **Phase**: M1 — CPU Baseline Inference (16/35 tasks complete)
+- **Last completed**: T027 — Stories110M weight converter (110 files, 208.9 MB fp16)
+- **Next task**: T028 (GPT-2 BPE tokenizer), T031 (GPT-2 weight loading), T032+ (CPU forward pass)
 - **Branch**: `main`
 - **Repo is green**: YES (test_ane_runtime: 11/11 pass)
 - **Known issues**: ANE minimum tensor size — [1,4,1,4] fails, need [1,256,1,64]+
 - **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8
 
 ## What Just Happened (Session 1 continued — M1 Core Runtime)
+
+### T027: Stories110M Weight Converter
+1. Parses Karpathy's llama2.c binary format (7×int32 header + flat fp32 weights)
+2. Produces 110 blob files: embed + 12 layers × 9 weights + rms_final (208.9 MB fp16)
+3. Config verified: dim=768, hidden=2048, heads=12, seq=1024, vocab=32000
+
+---
 
 ### T024-T026: BLOBFILE Writer + GPT-2 Weight Converter
 1. **T024**: `make_blob_header()` + `convert_tensor_to_blob()` — 128-byte header + fp16 data
