@@ -139,7 +139,7 @@
 | Task | ID | Size | Status |
 |------|----|------|--------|
 | ANE single-token spike | T099 | M | **DONE** |
-| ANE decode forward MIL | T100 | L | Pending |
+| ANE decode forward MIL | T100 | L | **DONE** |
 | ANE decode step | T101 | L | Pending |
 | Refactor infer to ANE full | T102 | L | Pending |
 | Golden tests (ANE full) | T103 | M | Pending |
@@ -177,11 +177,11 @@
 - **M4**: 6/6 complete (ALL DONE)
 - **M5**: 0/6 complete
 - **M6**: 0/3 complete (stretch)
-- **Phase 8 (ANE Full Forward)**: 1/6 complete
+- **Phase 8 (ANE Full Forward)**: 2/6 complete
 - **Phase 9 (Benchmarks)**: 0/4 complete
 - **Phase 10 (Abstractions)**: 0/5 complete
 - **Phase 11 (Build Quality)**: 0/3 complete
-- **Grand Total**: 90/116 complete (0 in progress)
+- **Grand Total**: 91/116 complete (0 in progress)
 - **Critical paths**: Training DONE | Weight swap DONE | ANE inference v3: T099→T104 | Benchmarks: T105→T108
 
 ## Decisions Log
@@ -199,6 +199,7 @@
 | 2026-03-03 | v3 spec: Expanded benchmark harness | bench kernels, inference, training, swap; SRAM spill detection |
 | 2026-03-03 | v3 spec: Project evolution roadmap | Stage 1 (Core) → Stage 2 (Compiler/auto-tune) → Stage 3 (Platform) |
 | 2026-03-03 | Program cache: store/lookup (not compile-on-miss) | Cache can't know how to compile each kernel type; callers compile on miss and store |
+| 2026-03-03 | Decode uses seq=16 (not seq=1) as minimum ANE bucket | ANE requires ~49KB minimum IOSurface allocation; seq=1 tensors fail at eval even though they compile |
 
 ## Blockers
 - **None** — M4 complete, Phase 8 ready to start
@@ -209,7 +210,7 @@
 | Private API breaks on macOS update | All ANE work blocked | **Validated** — works on macOS 15 / M4 Max |
 | ~119 compile limit per process | Training requires exec() restart | **Validated** — exec() restart works (T004/T007) |
 | SDPA ignores causal masks | Wrong attention outputs | **Confirmed** — must decompose manually (T008 doc) |
-| ANE minimum tensor size | Small tensors fail at eval | **Known** — [1,4,1,4] fails; [1,256,1,64] works |
+| ANE minimum tensor size | Small tensors fail at eval | **CONFIRMED** — seq=1 fails at eval; minimum IOSurface allocation ~49KB, use seq=16 as decode bucket |
 | ANE multi-output buffer sizes | Mixed-size outputs fail eval | **SOLVED** — pad all output IOSurfaces to max size |
 | GPT-2 BPE tokenizer complexity | Large task (T028) | **SOLVED** — T028 done |
 | fp16 numerical drift | Golden tests may need relaxed tolerance | **Managed** — two-tier tolerance in golden tests |

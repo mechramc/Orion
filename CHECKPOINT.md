@@ -21,6 +21,41 @@
 - **Known issues**: HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes
 - **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 16/16, test_train_smoke 7/7, test_program_cache 42/42
 
+## Session 9 — T100 ANE Decode MIL Generators
+
+### T100: ANE Decode Forward MIL (DONE)
+- Created `kernels/inference/gpt2_decode_ane.milgen.{h,m}` — MIL generators for single-token ANE decode
+- Two kernels per layer:
+  - `decode_proj`: x [1,d,1,16] → LN1 → Q,K,V [1,d,1,16] (3 outputs)
+  - `decode_ffn`: x [1,d,1,16] → LN2 → FC up → GELU → FC down → residual → hidden [1,d,1,16] (1 output)
+
+### Key Discovery: ANE Minimum IOSurface Allocation
+- **ANE requires minimum ~49KB IOSurface allocation for eval**
+- seq=1 tensors compile but FAIL at eval (status 0x1d) — allocation too small (3072 bytes)
+- Minimum working: [768, 16] = 49152 bytes (48KB exactly)
+- ANE internally uses a stride of 16 for the seq dimension in padded surfaces
+- Solution: Use `ORION_DECODE_SEQ = 16` as minimum decode bucket
+- Token data at seq position 0, zero-padding at positions 1-15
+- This invalidates T099 spike results which reported seq=1 working (environment may have changed)
+
+### Test Results (tests/test_decode_ane.m, 7/7 pass)
+- MIL generation: correct structure, seq=16 tensors, proper outputs
+- Compile: ~60-70ms per kernel
+- Eval: ~0.15-0.2ms per kernel
+- Per-layer decode: 0.315ms (proj + ffn)
+- Projected 12-layer ANE: 3.8ms (well under 5ms threshold)
+- FFN residual: mean = 0.5000 (exact match expected)
+
+### Files Created/Modified
+- `kernels/inference/gpt2_decode_ane.milgen.h` — NEW (decode generator header, ORION_DECODE_SEQ=16)
+- `kernels/inference/gpt2_decode_ane.milgen.m` — NEW (decode MIL generators)
+- `tests/test_decode_ane.m` — NEW (7 tests)
+
+### Next: T101 (ANE Decode Step)
+Wire decode kernels into a decode loop: embed token → ANE proj → CPU cross-attention → ANE FFN → sampling
+
+---
+
 ## What Just Happened (Session 8 — M4 Weight Swapping Complete)
 
 ### T084: Program Cache (L)
