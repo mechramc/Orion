@@ -11,6 +11,9 @@ xcuserdata/
 model/blobs/*
 !model/blobs/.gitkeep
 
+# Weight files (downloaded, large)
+model/weights/*.bin
+
 # Python
 __pycache__/
 *.pyc
@@ -25,6 +28,18 @@ venv/
 # IDE
 .vscode/
 .idea/
+
+# Vendor (upstream clones)
+vendor/
+
+# Data
+data/
+
+# Experiments
+experiments/
+
+# Docs (generated logs)
+docs/*.txt
 
 # Checkpoints
 checkpoints/

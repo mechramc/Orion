@@ -9,18 +9,42 @@
 ## Last Updated By
 - **Tool**: Claude Code
 - **Date**: 2026-03-03
-- **Session**: 1
+- **Session**: 1 (continued)
 
 ## Current State
-- **Phase**: Project Initialization — repo scaffolded, spec updated, task list generated
-- **Last completed**: Session 1 — repo init + spec rewrite + 94-task atomic task list
-- **Next task**: M0 — Clone upstream repos (T001, T002), build and run (T003-T007), hello MIL (T008)
+- **Phase**: M0 — Upstream Validation (9/11 tasks complete)
+- **Last completed**: T001-T007, T010, T011 — both upstreams cloned, built, validated; data + weights downloaded
+- **Next task**: T008 (Hello MIL proof-of-concept), T009 (ANE API reference docs)
 - **Branch**: `main`
-- **Repo is green**: YES (no build system yet — scaffolding only)
+- **Repo is green**: YES (upstream builds verified on M4 Max)
 - **Known issues**: None
-- **Tests passing**: N/A (no tests implemented yet)
+- **Tests passing**: N/A (no Orion tests yet — upstream training validated)
 
-## What Just Happened (Session 1)
+## What Just Happened (Session 1 continued — M0 Execution)
+
+### M0 Upstream Validation (T001-T007, T010, T011)
+1. **T001 + T002**: Cloned maderix/ANE and ANEgpt into `vendor/maderix-ane/` and `vendor/anegpt/`
+2. **T003**: Built `train_large` from maderix/ANE — compiles clean with `xcrun clang`
+3. **T004**: Ran `train_large` for 15 steps on M4 Max:
+   - Loss: 10.39 → 10.12 (decreasing as expected)
+   - 75.3 ms/step, 1.24 TFLOPS sustained, 7.8% ANE utilization
+   - Compile time: 83.3% of wall time
+   - exec() restart at step 10 works seamlessly
+4. **T005**: Built ANEgpt binaries (`train_large`, `train_large_ane`) — 9 warnings (cosmetic)
+5. **T006**: Built `libane_bridge.dylib` via ANEgpt Python bridge Makefile
+6. **T007**: Ran ANEgpt `train_large` — identical loss trajectory to maderix/ANE
+7. **T010**: Downloaded TinyStories pretokenized data (41.3 MB, 20.6M tokens, uint16 Llama2 BPE 32K vocab)
+8. **T011**: Downloaded Stories110M weights (418 MB) to `model/weights/stories110M.bin`
+
+### Key Performance Observations
+- ANE compile dominates wall time (83%) — validates need for program cache (M4)
+- exec() restart overhead is negligible (~50ms) — safe for 119-compile workaround
+- Loss trajectory matches between maderix/ANE and ANEgpt — codebases are functionally equivalent for training
+- 7.8% ANE utilization suggests significant headroom if compile overhead reduced
+
+---
+
+## What Happened Earlier (Session 1 — Init)
 
 ### Repo Initialization
 1. Initialized git repo at `/Users/murai-labs/github/Orion`
@@ -84,15 +108,12 @@
 
 ## What To Pick Up Next
 
-### Immediate (Session 2) — M0 Upstream Validation
-1. **T001 + T002**: Clone maderix/ANE and ANEgpt into `vendor/`
-2. **T003**: Build `train_large` from maderix/ANE
-3. **T004**: Run for 10+ steps, capture output
-4. **T005 + T006**: Build ANEgpt binaries + bridge dylib
-5. **T007**: Run ANEgpt train_large with TinyStories data
-6. **T008**: Implement "hello MIL" — compile trivial MIL, eval on ANE, read result
-7. **T009**: Document ANE API calling sequence from upstream code
-8. **T010 + T011**: Download data + weights
+### Immediate — Finish M0 (2 tasks remaining)
+1. **T008** (M): Hello MIL proof-of-concept — compile trivial MIL program, eval on ANE, read result back → `experiments/hello_mil.m`
+   - This is the **critical path** gate for all M1+ ANE work
+   - Use upstream `ane_runtime.h` patterns from maderix/ANE as reference
+2. **T009** (S): Document ANE API calling sequence → `docs/ane_api_reference.md`
+   - Can run in parallel with T008
 
 ### After M0
 - Begin M1 Phase 1 (core runtime): T012-T018 (IOSurface + ANE runtime)
@@ -104,11 +125,15 @@ None — all changes committed.
 ## Commits This Session
 1. `71119b0` — Initial repo scaffold with full project structure and updated spec
 2. `1e9f330` — Add atomic task list with 94 tasks across 7 phases
+3. `(pending)` — M0 upstream validation: 9/11 tasks complete
 
 ## Warnings for Next Session
+- `vendor/` is gitignored — upstream repos must be cloned locally (`git clone` into `vendor/`)
+- `data/` is gitignored — TinyStories data must be downloaded locally via `scripts/download_data.sh`
+- Weight files are gitignored — `model/weights/stories110M.bin` (418MB) must be downloaded locally
 - No build system yet — `xcrun clang` single-file compilation (match upstream)
-- `vendor/` directory does not exist yet — create when cloning upstream
 - Weight blobs are gitignored (`model/blobs/*`) — must run converters locally
 - Private ANE APIs require macOS 15+ on Apple Silicon — cannot be tested in CI
 - SIP may need to be considered for dlopen of private frameworks
 - Python deps (torch, transformers) needed for weight conversion — install in venv
+- ANE compile time dominates (83% of wall time) — plan for this in benchmarks

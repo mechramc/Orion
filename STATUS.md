@@ -5,24 +5,24 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**Project Initialization (Session 1)** — Repo scaffolded with full directory structure, updated spec with verified references, and 94-task atomic task list generated. No implementation code yet. Ready to begin M0 (upstream validation).
+**M0 — Upstream Validation (Session 1)** — Both upstream repos cloned, built, and validated on M4 Max. Training runs 15 steps successfully with exec() restart. Data + weights downloaded. Remaining: hello MIL (T008) and API docs (T009).
 
 ## Milestone Progress
 
 ### M0 — Upstream Validation
 | Task | ID | Size | Status |
 |------|----|------|--------|
-| Clone maderix/ANE | T001 | S | Pending |
-| Clone ANEgpt | T002 | S | Pending |
-| Build maderix/ANE train_large | T003 | M | Pending |
-| Run train_large 10+ steps | T004 | M | Pending |
-| Build ANEgpt binaries | T005 | M | Pending |
-| Build libane_bridge.dylib | T006 | S | Pending |
-| Run ANEgpt train_large | T007 | M | Pending |
+| Clone maderix/ANE | T001 | S | **DONE** |
+| Clone ANEgpt | T002 | S | **DONE** |
+| Build maderix/ANE train_large | T003 | M | **DONE** |
+| Run train_large 10+ steps | T004 | M | **DONE** |
+| Build ANEgpt binaries | T005 | M | **DONE** |
+| Build libane_bridge.dylib | T006 | S | **DONE** |
+| Run ANEgpt train_large | T007 | M | **DONE** |
 | Hello MIL proof-of-concept | T008 | M | Pending |
 | Document ANE API reference | T009 | S | Pending |
-| Download TinyStories data | T010 | S | Pending |
-| Download Stories110M weights | T011 | S | Pending |
+| Download TinyStories data | T010 | S | **DONE** |
+| Download Stories110M weights | T011 | S | **DONE** |
 
 ### M1 — CPU Baseline Inference
 | Task | ID | Size | Status |
@@ -136,7 +136,7 @@
 | Hot-swap demo | T098 | L | Pending |
 
 ## Task Progress
-- **M0**: 0/11 complete
+- **M0**: 9/11 complete (T008, T009 remaining)
 - **M1**: 0/35 complete
 - **M2**: 0/10 complete
 - **M3**: 0/27 complete
