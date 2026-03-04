@@ -1,13 +1,13 @@
 // test_decode_ane.m — T100: Test ANE decode MIL generators
 //
-// Tests that gpt2_decode_ane.milgen.m generates valid MIL programs
-// that compile and eval on ANE with seq=ORION_DECODE_SEQ (16).
+// Tests that compiler frontend generates valid MIL programs
+// that compile and eval on ANE with seq=ORION_GRAPH_DECODE_SEQ (16).
 //
 // Build:
 //   cd /Users/murai-labs/Github/Orion && xcrun clang -O2 -fobjc-arc -DACCELERATE_NEW_LAPACK \
 //     -framework Foundation -framework IOSurface -framework Accelerate -ldl -I . \
 //     core/{ane_runtime,iosurface_tensor,mil_builder}.m \
-//     kernels/inference/gpt2_decode_ane.milgen.m \
+//     compiler/{kernel_adapter,frontends/gpt2_decode}.m \
 //     tests/test_decode_ane.m -o tests/test_decode_ane
 //
 // Run:
@@ -21,7 +21,8 @@
 #import "core/ane_runtime.h"
 #import "core/iosurface_tensor.h"
 #import "core/mil_builder.h"
-#import "kernels/inference/gpt2_decode_ane.milgen.h"
+#include "compiler/kernel_adapter.h"
+#include "compiler/frontends/gpt2_decode.h"
 
 static int g_pass = 0, g_fail = 0;
 
@@ -167,7 +168,7 @@ static void test_decode_proj_mil_generation(void) {
         .n_layer = 12, .n_head = 12, .d_model = 768,
         .head_dim = 64, .hidden_dim = 3072, .vocab = 50257, .max_seq = 1024
     };
-    NSString *mil = orion_milgen_gpt2_decode_proj(0, &cfg);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_gpt2_decode_proj,0, &cfg);
     ASSERT(mil != nil, "MIL text should not be nil");
     ASSERT(mil.length > 100, "MIL text should be substantial");
     ASSERT([mil containsString:@"func main<ios18>"], "Should have function header");
@@ -182,7 +183,7 @@ static void test_decode_ffn_mil_generation(void) {
         .n_layer = 12, .n_head = 12, .d_model = 768,
         .head_dim = 64, .hidden_dim = 3072, .vocab = 50257, .max_seq = 1024
     };
-    NSString *mil = orion_milgen_gpt2_decode_ffn(0, &cfg);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_gpt2_decode_ffn,0, &cfg);
     ASSERT(mil != nil, "MIL text should not be nil");
     ASSERT(mil.length > 100, "MIL text should be substantial");
     ASSERT([mil containsString:@"func main<ios18>"], "Should have function header");
@@ -198,10 +199,10 @@ static void test_decode_proj_compile_eval(void) {
         .head_dim = 64, .hidden_dim = 3072, .vocab = 50257, .max_seq = 1024
     };
     int d = cfg.d_model;
-    int seq = ORION_DECODE_SEQ;
+    int seq = ORION_GRAPH_DECODE_SEQ;
     int count = d * seq;
 
-    NSString *mil = orion_milgen_gpt2_decode_proj(0, &cfg);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_gpt2_decode_proj,0, &cfg);
     NSDictionary *wdict = make_proj_weights(0, d);
 
     double t0 = time_ms();
@@ -264,10 +265,10 @@ static void test_decode_ffn_compile_eval(void) {
     };
     int d = cfg.d_model;
     int h = cfg.hidden_dim;
-    int seq = ORION_DECODE_SEQ;
+    int seq = ORION_GRAPH_DECODE_SEQ;
     int count = d * seq;
 
-    NSString *mil = orion_milgen_gpt2_decode_ffn(0, &cfg);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_gpt2_decode_ffn,0, &cfg);
     NSDictionary *wdict = make_ffn_weights(0, d, h);
 
     double t0 = time_ms();
@@ -330,7 +331,7 @@ static void test_decode_proj_multiple_layers(void) {
     int layers[] = {0, 5, 11};
     for (int i = 0; i < 3; i++) {
         int l = layers[i];
-        NSString *mil = orion_milgen_gpt2_decode_proj(l, &cfg);
+        NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_gpt2_decode_proj,l, &cfg);
         NSString *expected_path = [NSString stringWithFormat:@"layer%d/wq.bin", l];
         bool has_path = [mil containsString:expected_path];
         ASSERT(has_path, "should reference correct blob path for layer");
@@ -355,7 +356,7 @@ static void test_decode_ffn_multiple_layers(void) {
     int layers[] = {0, 5, 11};
     for (int i = 0; i < 3; i++) {
         int l = layers[i];
-        NSString *mil = orion_milgen_gpt2_decode_ffn(l, &cfg);
+        NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_gpt2_decode_ffn,l, &cfg);
         NSString *expected_path = [NSString stringWithFormat:@"layer%d/wfc.bin", l];
         bool has_path = [mil containsString:expected_path];
         ASSERT(has_path, "should reference correct blob path for layer");
@@ -376,15 +377,15 @@ static void test_decode_perf(void) {
     };
     int d = cfg.d_model;
     int h = cfg.hidden_dim;
-    int seq = ORION_DECODE_SEQ;
+    int seq = ORION_GRAPH_DECODE_SEQ;
     int count = d * seq;
 
-    NSString *proj_mil = orion_milgen_gpt2_decode_proj(0, &cfg);
+    NSString *proj_mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_gpt2_decode_proj,0, &cfg);
     NSDictionary *proj_wdict = make_proj_weights(0, d);
     OrionProgram *proj_prog = orion_compile_mil(proj_mil.UTF8String, proj_wdict, "perf_proj");
     ASSERT(proj_prog != NULL, "proj should compile");
 
-    NSString *ffn_mil = orion_milgen_gpt2_decode_ffn(0, &cfg);
+    NSString *ffn_mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_gpt2_decode_ffn,0, &cfg);
     NSDictionary *ffn_wdict = make_ffn_weights(0, d, h);
     OrionProgram *ffn_prog = orion_compile_mil(ffn_mil.UTF8String, ffn_wdict, "perf_ffn");
     ASSERT(ffn_prog != NULL, "ffn should compile");

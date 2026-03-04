@@ -73,9 +73,14 @@ int orion_gb_conv1x1(OrionGraph* g, int input, int weight, int bias, const char*
     return orion_graph_add_node(g, &n);
 }
 
-// Helper for binary ops — infer shape from first input
+// Helper for binary ops — infer shape from first non-scalar input
 static int binary_op(OrionGraph* g, OrionOp op, int a, int b, const char* name) {
-    OrionNode n = make_node(op, name, g->nodes[a].dtype, g->nodes[a].shape);
+    const int* shape = g->nodes[a].shape;
+    // If first operand is scalar (all zeros), use second operand's shape
+    if (shape[0] == 0 && shape[1] == 0 && shape[2] == 0 && shape[3] == 0) {
+        shape = g->nodes[b].shape;
+    }
+    OrionNode n = make_node(op, name, g->nodes[a].dtype, (int*)shape);
     n.inputs[0] = a;
     n.inputs[1] = b;
     n.n_inputs = 2;

@@ -95,4 +95,11 @@ NSString* orion_mil_program(NSString* body, NSArray<NSString*>* inputs, NSString
 /// @return Complete MIL program text.
 NSString* orion_mil_program_multi(NSString* body, NSArray<NSString*>* inputs, NSArray<NSString*>* output_vars);
 
+/// Generate causal mask BLOBFILE data (fp16 [seq, seq], 0 for j<=i, -1e4 for j>i).
+/// Returns NSData containing a valid BLOBFILE (128-byte header + fp16 data).
+NSData* orion_make_causal_mask_blob(int seq_len);
+
+/// Return MIL-style blob path for causal mask: "@model_path/masks/causal_{seq_len}.bin"
+NSString* orion_causal_mask_path(int seq_len);
+
 #endif // ORION_MIL_BUILDER_H

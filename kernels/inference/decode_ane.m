@@ -1,6 +1,7 @@
 #import "decode_ane.h"
 #import "decode_cpu.h"
-#import "gpt2_decode_ane.milgen.h"
+#import "../../compiler/kernel_adapter.h"
+#include "../../compiler/frontends/gpt2_decode.h"
 #import "../../core/iosurface_tensor.h"
 #import "../../core/ane_program_cache.h"
 #import "../../core/kernel.h"
@@ -91,15 +92,15 @@ static NSDictionary* build_decode_ffn_wdict(int layer_idx, NSString *dir) {
 
 #pragma mark - OrionKernel Adapters
 
-// MIL gen adapters — decode kernels ignore bucket
-static NSString* milgen_decode_proj_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+// Compiler MIL gen adapters — decode kernels ignore bucket
+static NSString* compiler_decode_proj_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
     (void)bucket;
-    return orion_milgen_gpt2_decode_proj(layer_idx, cfg);
+    return orion_kernel_adapter_generate_mil_2arg(orion_frontend_gpt2_decode_proj, layer_idx, cfg);
 }
 
-static NSString* milgen_decode_ffn_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+static NSString* compiler_decode_ffn_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
     (void)bucket;
-    return orion_milgen_gpt2_decode_ffn(layer_idx, cfg);
+    return orion_kernel_adapter_generate_mil_2arg(orion_frontend_gpt2_decode_ffn, layer_idx, cfg);
 }
 
 // Weight dict adapters
@@ -113,17 +114,17 @@ static NSDictionary* wdict_decode_ffn_adapter(int layer_idx, int bucket, const c
     return build_decode_ffn_wdict(layer_idx, @(blob_dir));
 }
 
-// Kernel instances
+// Kernel instances — using compiler-generated MIL
 static const OrionKernel kDecodeProj = {
     .name = "decode_proj",
-    .generate_mil = milgen_decode_proj_adapter,
+    .generate_mil = compiler_decode_proj_adapter,
     .build_wdict = wdict_decode_proj_adapter,
     .n_inputs = 1, .n_outputs = 3,
 };
 
 static const OrionKernel kDecodeFFN = {
     .name = "decode_ffn",
-    .generate_mil = milgen_decode_ffn_adapter,
+    .generate_mil = compiler_decode_ffn_adapter,
     .build_wdict = wdict_decode_ffn_adapter,
     .n_inputs = 1, .n_outputs = 1,
 };
@@ -141,7 +142,7 @@ bool orion_ane_decode_step(const OrionGPT2Weights* w,
     int head_dim = kv->head_dim;
     int vocab = w->vocab;
     int pos = kv->current_len;
-    int seq = ORION_DECODE_SEQ;
+    int seq = ORION_GRAPH_DECODE_SEQ;
     int count = d * seq;
 
     OrionModelConfig cfg = kGPT2_124M;

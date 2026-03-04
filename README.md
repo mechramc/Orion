@@ -43,7 +43,7 @@ Orion bypasses CoreML entirely. It talks to the ANE through private frameworks (
 
 - **Training on the ANE** — forward and backward passes on hardware Apple restricted to inference
 - **Direct program caching** — avoid recompilation overhead that plagues CoreML
-- **Custom kernel pipelines** — hand-tuned MIL generators instead of opaque graph optimization
+- **Custom kernel pipelines** — compiler-generated MIL from graph IR with optimization passes
 - **Budget-aware compilation** — track and manage the ~119 compile limit per process
 
 This is the first open-source project to demonstrate **LLM training on Apple's Neural Engine**.
@@ -77,13 +77,19 @@ This is the first open-source project to demonstrate **LLM training on Apple's N
 ### Training
 
 ```bash
+# Start training (1 step per process due to ANE compile budget)
 ./orion train --weights model/blobs/stories110m \
   --dataset data/tinystories.bin \
-  --steps 20000 --grad_accum 10 \
-  --checkpoint_every 1000 --lr 3e-4
+  --steps 100 --grad_accum 4 --lr 1e-5
+
+# Resume from checkpoint
+./orion train --weights model/blobs/stories110m \
+  --dataset data/tinystories.bin \
+  --steps 100 --grad_accum 4 --lr 1e-5 \
+  --resume checkpoints/step_50.bin
 ```
 
-Training runs: ANE forward/backward → CPU weight updates → Adam optimizer → checkpoint → recompile ANE programs with updated weights. Resume from any checkpoint.
+Training runs: ANE forward/backward → CPU weight updates → Adam optimizer → checkpoint → `exec()` restart with updated weights. Each process compiles ANE programs once (72 programs per step), then restarts to stay within the ~119 compile budget. Resume from any checkpoint is verified stable (5-step chain, 0 NaN).
 
 ### Benchmarking
 
@@ -122,10 +128,10 @@ This turns Orion into a **measurement tool** for ANE performance, not just an in
            └──────────────┬───────────────────────┘
                           │
            ┌──────────────┴───────────────────────┐
-           │          Kernel Layer                  │
-           │  MIL generators → MIL text             │
-           │  Weight dict builders → BLOBFILE refs   │
-           │  Program cache (store/lookup/evict)     │
+           │          Compiler + Kernel Layer         │
+           │  Graph IR → optimized MIL text           │
+           │  Weight dict builders → BLOBFILE refs    │
+           │  Program cache (store/lookup/evict)      │
            └──────────────┬───────────────────────┘
                           │
            ┌──────────────┴───────────────────────┐
@@ -143,15 +149,16 @@ This turns Orion into a **measurement tool** for ANE performance, not just an in
            └────────────────────────────────────────┘
 ```
 
-### Abstraction layers (Phase 10, in progress)
+### Abstraction layers
 
 | Layer | Role | Status |
 |-------|------|--------|
-| `OrionKernel` | Wraps MIL generation + weight dict + cache + compile + eval into one call | Planned |
+| `OrionKernel` | Wraps MIL generation + weight dict + cache + compile + eval into one call | Done |
 | `OrionModelConfig` | Model architecture description (layers, heads, dims, vocab) | Done |
-| `OrionRuntime` | ANE init + compile budget tracking + kernel dispatch | Planned |
+| `OrionRuntime` | ANE init + compile budget tracking + kernel dispatch | Done |
+| `OrionCompiler` | Graph IR → optimized MIL text (validate, optimize, codegen) | Done |
 
-These abstractions are what make Orion a **general ANE model runtime** rather than a single-model demo. Adding a new model means implementing its `OrionKernel` definitions and weight layout — the compile-cache-eval machinery is shared.
+These abstractions make Orion a **general ANE model runtime** rather than a single-model demo. Adding a new model means implementing its compiler frontend (graph builder) and weight layout — the compile-cache-eval machinery is shared.
 
 ### Data flow
 
@@ -176,24 +183,24 @@ These abstractions are what make Orion a **general ANE model runtime** rather th
 
 ## Project Roadmap
 
-### Stage 1 — Orion Core *(finishing)*
+### Stage 1 — Orion Core *(complete)*
 
-ANE training runtime + inference engine. Direct MIL compilation, program caching, weight swapping, benchmark harness. Two models: GPT-2 124M (inference) and Stories110M (training). Runtime abstractions (`OrionKernel`, `OrionRuntime`, model registry) in progress — these make Orion a general toolkit rather than a single-model demo.
+ANE training runtime + inference engine. Direct MIL compilation, program caching, weight swapping, benchmark harness. Two models: GPT-2 124M (inference) and Stories110M (training). Runtime abstractions (`OrionKernel`, `OrionRuntime`, model registry) make Orion a general toolkit rather than a single-model demo.
 
-**Status**: 100/116 tasks complete. 11 remaining (runtime abstractions + build quality).
+**Status**: Complete. 116/116 tasks.
 
-### Stage 2 — Orion Compiler *(upcoming)*
+### Stage 2 — Orion Compiler *(complete)*
 
-Automatic optimization of MIL graphs for ANE. The goal: hand-tuned ANE performance without hand-written MIL generators.
+Graph-level IR and optimization pipeline that replaces hand-written MIL generators. Models are now defined as compiler frontends (pure C graph builders) instead of hand-written MIL text. The compiler validates, optimizes, and codegens to ANE-compatible MIL automatically.
 
-Planned capabilities:
-- **Kernel fusion** — merge adjacent ops into single ANE programs to reduce dispatch overhead
-- **Operator scheduling** — optimal ordering of MIL ops for ANE's convolution engine
-- **SRAM tiling** — keep working sets under 32MB to avoid spill-to-DRAM performance collapse
-- **Auto-bucketing** — automatically select optimal sequence length buckets per model
-- **Graph profiling** — identify bottlenecks and generate optimization reports
+Capabilities:
+- **Graph IR** — ~27 ops, fluent builder API, topological ordering
+- **Optimization passes** — DCE, identity elimination, cast fusion, SRAM annotation, uniform output padding
+- **ANE validation** — constraint checking before compilation (shape limits, op support)
+- **13 compiler frontends** — 4 GPT-2 inference + 6 Stories training + 3 utility kernels
+- **MIL diff tool** — structural comparison between generated MIL programs
 
-This is what turns Orion from "a runtime that runs models" into "a compiler that makes models fast on ANE."
+**Status**: Complete. 32/32 compiler tasks + milgen fully replaced. 21/21 tests pass.
 
 ### Stage 3 — Orion Platform *(future)*
 
@@ -231,6 +238,9 @@ Key findings from building on the ANE:
 - SDPA causal masks are ignored by the ANE — must decompose attention manually (Q@K^T → mask → softmax → @V)
 - Weight dict must be `@{}` (empty dict), not `nil`, for weight-free programs
 - `milText` must be `NSData*` (UTF-8 bytes), not `NSString*`
+- ANE MIL requires named const refs for matmul `transpose_x`/`transpose_y` — inline bool literals (`true`/`false`) are rejected
+- ANE MIL `conv` op does NOT support `bias=` parameter — bias must be a separate `add` op
+- After MIL optimization passes, output variable names must reference live nodes — dead node names in return tuples cause InvalidMILProgram
 
 ---
 
@@ -248,7 +258,7 @@ Orion builds on two open-source projects that reverse-engineered Apple's ANE:
 | **Tokenizer** | N/A | Python-side | Native BPE + SentencePiece in C |
 | **Program cache** | N/A | None | Composite key cache with eviction |
 | **Benchmarking** | N/A | N/A | 4-mode suite with regression tracking |
-| **MIL generation** | Hardcoded | Hardcoded | Parameterized generators |
+| **MIL generation** | Hardcoded | Hardcoded | Compiler (graph IR → optimized MIL) |
 
 ---
 
@@ -261,9 +271,9 @@ Orion builds on two open-source projects that reverse-engineered Apple's ANE:
 ## Building
 
 ```bash
-# Build with Makefile (30 source files, no Xcode project required)
+# Build with Makefile (~50 source files, no Xcode project required)
 make            # Build the orion binary
-make test       # Build and run all 17 test suites
+make test       # Build and run all 21 test suites
 make bench      # Run benchmark suite
 make clean      # Remove all build artifacts
 ```
@@ -280,7 +290,7 @@ python model/convert/hf_to_blobs_llama.py    # → model/blobs/stories110m/
 
 ## Project Status
 
-108 of 116 tasks complete across 11 phases. See [STATUS.md](STATUS.md) for the full dashboard.
+148 of 148 tasks complete across 13 phases. See [STATUS.md](STATUS.md) for the full dashboard and [RESULTS.md](RESULTS.md) for comprehensive benchmarks.
 
 | Phase | Status | Highlights |
 |-------|--------|------------|
@@ -293,6 +303,8 @@ python model/convert/hf_to_blobs_llama.py    # → model/blobs/stories110m/
 | Phase 9: Benchmark Harness | Complete | Per-kernel, inference, training, regression tracking |
 | Phase 10: Runtime Abstractions | Complete | OrionKernel, OrionRuntime, model registry |
 | Phase 11: Build & Quality | Complete | Makefile, zero warnings, constraints docs |
+| Phase 12: Orion Compiler | Complete | Graph IR, 5 optimization passes, 13 frontends, MIL codegen |
+| Phase 13: Milgen→Compiler | Complete | All MIL generators replaced by compiler, 21/21 tests pass |
 
 ## Acknowledgements
 

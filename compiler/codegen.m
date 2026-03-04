@@ -66,7 +66,7 @@ static void emit_conv(NSMutableString* m, const OrionGraph* g, const OrionNode* 
     [m appendFormat:@"        tensor<int32, [2]> %@_dl = const()[name=string(\"%@_dl\"), val=tensor<int32, [2]>([1,1])];\n", prefix, prefix];
     [m appendFormat:@"        int32 %@_gr = const()[name=string(\"%@_gr\"), val=int32(1)];\n", prefix, prefix];
 
-    // Conv op
+    // Conv op — bias handled as separate add node (ANE doesn't support bias= in conv)
     [m appendFormat:@"        %@ %s = conv("
      "dilations=%@_dl, groups=%@_gr, pad=%@_pd, pad_type=%@_pt, strides=%@_st, "
      "weight=%@, x=%@)[name=string(\"%s\")];\n",
@@ -113,11 +113,13 @@ static void emit_node(NSMutableString* m, const OrionGraph* g, int idx) {
             break;
 
         case ORION_OP_MATMUL: {
-            // Need transpose_x/y bool const refs — emit inline
-            [m appendFormat:@"        %@ %s = matmul(transpose_x=%@, transpose_y=%@, x=%@, y=%@)[name=string(\"%s\")];\n",
-             type_str, n->name,
-             n->attrs.transpose_x ? @"true" : @"false",
-             n->attrs.transpose_y ? @"true" : @"false",
+            // ANE MIL parser requires named const refs for bool params
+            [m appendFormat:@"        bool %s_tx = const()[name=string(\"%s_tx\"), val=bool(%@)];\n",
+             n->name, n->name, n->attrs.transpose_x ? @"true" : @"false"];
+            [m appendFormat:@"        bool %s_ty = const()[name=string(\"%s_ty\"), val=bool(%@)];\n",
+             n->name, n->name, n->attrs.transpose_y ? @"true" : @"false"];
+            [m appendFormat:@"        %@ %s = matmul(transpose_x=%s_tx, transpose_y=%s_ty, x=%@, y=%@)[name=string(\"%s\")];\n",
+             type_str, n->name, n->name, n->name,
              ref(g, n->inputs[0]), ref(g, n->inputs[1]), n->name];
             break;
         }
@@ -279,7 +281,7 @@ NSString* orion_codegen_mil(const OrionGraph* graph, const char* func_name) {
     [m appendString:@"    } -> ("];
     for (int i = 0; i < graph->n_outputs; i++) {
         if (i > 0) [m appendString:@", "];
-        [m appendString:@(graph->outputs[i].name)];
+        [m appendString:@(graph->nodes[graph->outputs[i].node_idx].name)];
     }
     [m appendString:@");\n"];
     [m appendString:@"}\n"];

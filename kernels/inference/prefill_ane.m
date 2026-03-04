@@ -1,8 +1,12 @@
 #import "prefill_ane.h"
-#import "gpt2_prefill_attn.milgen.h"
-#import "gpt2_prefill_ffn.milgen.h"
-#import "gpt2_final.milgen.h"
+#import "../../compiler/kernel_adapter.h"
+#import "../../compiler/codegen.h"
+#include "../../compiler/validate.h"
+#include "../../compiler/pipeline.h"
+#include "../../compiler/frontends/gpt2_prefill.h"
+#include "../../compiler/frontends/gpt2_final.h"
 #import "../../core/bucket.h"
+#import "../../core/mil_builder.h"
 #import "../../core/iosurface_tensor.h"
 #import "../../core/ane_program_cache.h"
 #import "../../core/kernel.h"
@@ -96,10 +100,25 @@ static NSDictionary* build_final_ln_wdict(NSString *dir) {
 
 #pragma mark - OrionKernel Adapters
 
-// MIL gen adapters — prefill_attn/ffn already match OrionMILGenFn signature
-static NSString* milgen_final_ln_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+// Compiler MIL gen adapters — call frontend → validate → optimize → codegen
+static NSString* compiler_prefill_attn_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+    return orion_kernel_adapter_generate_mil(orion_frontend_gpt2_prefill_attn, layer_idx, bucket, cfg);
+}
+
+static NSString* compiler_prefill_ffn_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+    return orion_kernel_adapter_generate_mil(orion_frontend_gpt2_prefill_ffn, layer_idx, bucket, cfg);
+}
+
+static NSString* compiler_final_ln_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
     (void)layer_idx;
-    return orion_milgen_gpt2_final_ln(bucket, cfg);
+    OrionGraph* g = orion_frontend_gpt2_final_ln(bucket, cfg);
+    if (!g) return nil;
+    OrionValidationResult vr = orion_graph_validate(g);
+    if (!vr.valid) { orion_graph_free(g); return nil; }
+    orion_pipeline_optimize(g);
+    NSString* mil = orion_codegen_mil(g, "main");
+    orion_graph_free(g);
+    return mil;
 }
 
 // Weight dict adapters — convert const char* → NSString*
@@ -117,24 +136,24 @@ static NSDictionary* wdict_final_ln_adapter(int layer_idx, int bucket, const cha
     return build_final_ln_wdict(@(blob_dir));
 }
 
-// Kernel instances
+// Kernel instances — using compiler-generated MIL
 static const OrionKernel kPrefillAttn = {
     .name = "prefill_attn",
-    .generate_mil = (OrionMILGenFn)orion_milgen_gpt2_prefill_attn,
+    .generate_mil = compiler_prefill_attn_adapter,
     .build_wdict = wdict_attn_adapter,
     .n_inputs = 1, .n_outputs = 3,
 };
 
 static const OrionKernel kPrefillFFN = {
     .name = "prefill_ffn",
-    .generate_mil = (OrionMILGenFn)orion_milgen_gpt2_prefill_ffn,
+    .generate_mil = compiler_prefill_ffn_adapter,
     .build_wdict = wdict_ffn_adapter,
     .n_inputs = 1, .n_outputs = 1,
 };
 
 static const OrionKernel kPrefillFinalLN = {
     .name = "prefill_final_ln",
-    .generate_mil = milgen_final_ln_adapter,
+    .generate_mil = compiler_final_ln_adapter,
     .build_wdict = wdict_final_ln_adapter,
     .n_inputs = 1, .n_outputs = 1,
 };

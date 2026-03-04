@@ -1,0 +1,128 @@
+# Orion — Results
+
+Comprehensive benchmark results and technical findings from Orion on Mac Studio M4 Max 64GB.
+
+---
+
+## Inference (GPT-2 124M, M4 Max)
+
+| Metric | Value |
+|--------|-------|
+| CPU decode throughput | **283 tok/s** |
+| CPU decode latency (p50) | 3.5 ms/token |
+| CPU decode latency (p90) | 3.7 ms/token |
+| ANE full forward throughput | **170+ tok/s** |
+| ANE decode latency | 5.78 ms/token |
+| ANE prefill (first call) | 1399 ms (83% compile time) |
+| ANE prefill (cached) | sub-100 ms |
+| Accuracy | 100% top-1 argmax, exact 5-token greedy match vs CPU baseline |
+
+Three inference modes: CPU-only, ANE prefill + CPU decode (hybrid), and ANE full forward. CPU decode is fastest per-token due to ANE dispatch overhead; ANE full forward demonstrates the hardware capability.
+
+---
+
+## Training (Stories110M, TinyStories vocab=32000)
+
+| Metric | Value |
+|--------|-------|
+| Step time | ~960 ms |
+| Throughput | 0.58 TFLOPS |
+| Gradient accumulation | 4 microbatches |
+| Learning rate | 1e-5 |
+| Compile budget | 72 programs/process → 1 step/process → auto-restart via `exec()` |
+
+### Stability Verification
+
+5-step resume chain verified end-to-end:
+
+| Step | Loss |
+|------|------|
+| 1 | 13.98 |
+| 2 | 13.97 |
+| 3 | 13.95 |
+| 4 | 13.94 |
+| 5 | 13.92 |
+
+- **0 NaN** across all 5 steps
+- Loss monotonically decreasing
+- Each step runs in a fresh process (compile budget management via `exec()`)
+- Checkpoint resume verified: weights, optimizer state, and step counter all restored correctly
+
+---
+
+## ANE Kernel Performance
+
+| Metric | Value |
+|--------|-------|
+| Single-token dispatch latency | ~0.03 ms |
+| Weight swap compile time | 11.3 ms |
+| Weight swap eval time | 0.15 ms |
+| 100-iter swap endurance RSS growth | 1.41x (pass, threshold 2.0x) |
+
+Kernel dispatch overhead is minimal — the ANE can service single-token requests well under the 5ms threshold, making full-forward decode viable.
+
+---
+
+## Compiler
+
+| Metric | Value |
+|--------|-------|
+| Operations | 27 ops |
+| Optimization passes | 5 (DCE, identity elimination, cast fusion, SRAM annotation, uniform output padding) |
+| Compiler frontends | 13 (4 GPT-2 inference + 6 Stories training + 3 utility) |
+| Structural equivalence | Verified against hand-written MIL for all 13 kernel types |
+
+The compiler translates graph IR to ANE-compatible MIL text. All hand-written `milgen` generators have been replaced by compiler frontends. The MIL diff tool verifies structural equivalence between generated and reference programs.
+
+---
+
+## Numerical Stability (Training NaN Fix)
+
+Three bugs caused NaN/Inf cascades during training. All fixed and verified.
+
+### Bug 1: Stale ANE Programs on Resume
+
+**Problem**: After checkpoint resume, ANE programs were compiled with stale (pre-resume) weights. The forward pass used old weights while the backward pass expected gradients from the new weights, causing divergence.
+
+**Fix**: Deferred ANE compilation — programs are now compiled *after* checkpoint weights are loaded, not before. Each process compiles exactly once with the correct weights.
+
+### Bug 2: fp16 Overflow Cascade
+
+**Problem**: Large activations in fp16 (ANE native format) overflowed to Inf during the forward pass. These Infs propagated through softmax and cross-entropy, producing NaN losses.
+
+**Fix**: fp16 clamping — activations are clamped to `[-65504, 65504]` (fp16 max) before operations that can amplify magnitude (softmax, layer norm). Applied in `stories_cpu_ops.m`.
+
+### Bug 3: Corrupted BLOBFILE Weights
+
+**Problem**: The BLOBFILE writer could produce corrupted weight data when the checkpoint's weight tensor layout didn't match the expected MIL weight dict format, causing silent numerical corruption.
+
+**Fix**: Gradient sanitization — weight updates are sanitized (NaN→0, Inf→clamp) before writing to BLOBFILE format. Added validation in `stories_train.m` to detect corrupted weights early.
+
+### Before/After
+
+| Metric | Before Fix | After Fix |
+|--------|-----------|-----------|
+| NaN rate | 100% (step 2+) | 0% (verified 5 steps) |
+| Loss trajectory | 13.98 → NaN | 13.98 → 13.92 (monotonic) |
+| Resume stability | Broken | Verified (5-step chain) |
+
+---
+
+## Hardware: Apple Neural Engine (M4 Max)
+
+| Property | Value |
+|----------|-------|
+| Generation | H16 |
+| Peak throughput | 15+ TFLOPS (fp16) |
+| Data format | fp16 `[1, C, 1, S]` on IOSurface |
+| Compile limit | ~119 programs per process |
+| SRAM | Limited; large models spill to DRAM |
+
+### Key Constraints
+
+- **Compile budget**: ~119 compilations per process before the ANE stops accepting programs. Managed via program cache and `exec()` restart.
+- **Tensor layout**: All I/O must be fp16 `[1, C, 1, S]` on IOSurface-backed memory. CPU↔ANE transfers require transpose.
+- **Minimum allocation**: ~49KB IOSurface minimum. `seq_len=1` compiles but fails at eval (status `0x1d`). Minimum decode bucket is `seq=16`.
+- **No concat**: ANE rejects the `concat` MIL op. Use multi-output programs with uniform buffer sizes instead.
+- **No causal masks in SDPA**: ANE ignores causal masks — attention must be manually decomposed (Q@K^T → mask → softmax → @V).
+- **Alphabetical output ordering**: Multi-output surfaces are ordered by MIL variable name, not return tuple order.

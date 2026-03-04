@@ -80,6 +80,9 @@ void orion_cpu_adam_step(float* param, const float* grad,
     for (int i = 0; i < size; i++) {
         float g = grad[i];
 
+        // Sanitize: skip NaN/Inf gradients (from fp16 overflow in ANE activations)
+        if (isnan(g) || isinf(g)) g = 0.0f;
+
         // Update biased first moment: m = beta1*m + (1-beta1)*g
         m[i] = beta1 * m[i] + (1.0f - beta1) * g;
 

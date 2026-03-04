@@ -2,8 +2,8 @@
 //
 // Tests:
 //   1-4:  Bucket selection (T050)
-//   5-7:  Attention milgen compile + eval on ANE (T047)
-//   8-10: FFN milgen compile + eval on ANE (T048)
+//   5-7:  Attention compiler frontend compile + eval on ANE (T047)
+//   8-10: FFN compiler frontend compile + eval on ANE (T048)
 //   11:   Combined attention→FFN for layer 0 (integration)
 //
 // Build:
@@ -11,8 +11,9 @@
 //     -framework Foundation -framework IOSurface -framework Accelerate -ldl \
 //     -o tests/test_ane_prefill tests/test_ane_prefill.m \
 //     core/ane_runtime.m core/iosurface_tensor.m core/mil_builder.m core/bucket.m \
-//     kernels/inference/gpt2_prefill_attn.milgen.m \
-//     kernels/inference/gpt2_prefill_ffn.milgen.m \
+//     compiler/kernel_adapter.m compiler/frontends/gpt2_prefill.m \
+//     compiler/frontends/gpt2_final.m compiler/validate.m \
+//     compiler/pipeline.m compiler/codegen.m \
 //     model/weight_loader.m kernels/inference/decode_cpu.m -I.
 // Run (from repo root):
 //   ./tests/test_ane_prefill
@@ -30,9 +31,12 @@
 #import "core/bucket.h"
 #import "model/configs/gpt2_124m.h"
 #import "model/weight_loader.h"
-#import "kernels/inference/gpt2_prefill_attn.milgen.h"
-#import "kernels/inference/gpt2_prefill_ffn.milgen.h"
-#import "kernels/inference/gpt2_final.milgen.h"
+#include "compiler/kernel_adapter.h"
+#include "compiler/frontends/gpt2_prefill.h"
+#include "compiler/frontends/gpt2_final.h"
+#include "compiler/validate.h"
+#include "compiler/pipeline.h"
+#include "compiler/codegen.h"
 #import "kernels/inference/prefill_ane.h"
 #import "kernels/inference/decode_cpu.h"
 
@@ -159,7 +163,7 @@ static void test_attn_prefill(void) {
     int count = d * seq;  // 24576 elements
 
     // Generate MIL text
-    NSString *mil = orion_milgen_gpt2_prefill_attn(0, seq, &kGPT2_124M);
+    NSString *mil = orion_kernel_adapter_generate_mil(orion_frontend_gpt2_prefill_attn, 0, seq, &kGPT2_124M);
     CHECK(mil != nil && mil.length > 0, "MIL text generated");
 
     // Build weight dict
@@ -230,7 +234,7 @@ static void test_ffn_prefill(void) {
     int count = d * seq;
 
     // Generate MIL text
-    NSString *mil = orion_milgen_gpt2_prefill_ffn(0, seq, &kGPT2_124M);
+    NSString *mil = orion_kernel_adapter_generate_mil(orion_frontend_gpt2_prefill_ffn, 0, seq, &kGPT2_124M);
     CHECK(mil != nil && mil.length > 0, "FFN MIL text generated");
 
     // Build weight dict
@@ -288,8 +292,8 @@ static void test_combined_layer(void) {
     NSMutableDictionary *ffn_dict  = build_ffn_weight_dict(0, "model/blobs/gpt2_124m");
 
     // Compile both programs
-    NSString *attn_mil = orion_milgen_gpt2_prefill_attn(0, seq, &kGPT2_124M);
-    NSString *ffn_mil  = orion_milgen_gpt2_prefill_ffn(0, seq, &kGPT2_124M);
+    NSString *attn_mil = orion_kernel_adapter_generate_mil(orion_frontend_gpt2_prefill_attn, 0, seq, &kGPT2_124M);
+    NSString *ffn_mil  = orion_kernel_adapter_generate_mil(orion_frontend_gpt2_prefill_ffn, 0, seq, &kGPT2_124M);
 
     OrionProgram *attn_prog = orion_compile_mil(attn_mil.UTF8String, attn_dict, "comb_attn_L0");
     OrionProgram *ffn_prog  = orion_compile_mil(ffn_mil.UTF8String, ffn_dict, "comb_ffn_L0");
@@ -383,7 +387,7 @@ static void test_ane_vs_cpu(void) {
 
     // Compile and run attention on ANE
     NSMutableDictionary *wdict = build_attn_weight_dict(0, seq, "model/blobs/gpt2_124m");
-    NSString *mil = orion_milgen_gpt2_prefill_attn(0, seq, &kGPT2_124M);
+    NSString *mil = orion_kernel_adapter_generate_mil(orion_frontend_gpt2_prefill_attn, 0, seq, &kGPT2_124M);
     OrionProgram *prog = orion_compile_mil(mil.UTF8String, wdict, "cmp_attn_L0");
 
     if (prog) {

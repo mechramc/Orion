@@ -9,7 +9,7 @@ LDFLAGS  = -ldl $(FRAMEWORKS)
 BUILDDIR = build
 
 # ---------------------------------------------------------------------------
-# Source files (42 total: 30 original + 12 compiler)
+# Source files (38 total: 24 runtime + 14 compiler)
 # ---------------------------------------------------------------------------
 
 CORE_SRC = \
@@ -28,16 +28,10 @@ INFERENCE_SRC = \
 	kernels/inference/prefill_ane.m \
 	kernels/inference/decode_ane.m \
 	kernels/inference/decode_cpu.m \
-	kernels/inference/kv_cache.m \
-	kernels/inference/gpt2_prefill_attn.milgen.m \
-	kernels/inference/gpt2_prefill_ffn.milgen.m \
-	kernels/inference/gpt2_final.milgen.m \
-	kernels/inference/gpt2_decode_ane.milgen.m
+	kernels/inference/kv_cache.m
 
 TRAINING_SRC = \
 	kernels/training/stories_train.m \
-	kernels/training/stories_train_kernels.milgen.m \
-	kernels/training/classifier_softmax.milgen.m \
 	kernels/training/stories_cpu_ops.m \
 	kernels/training/data_loader.m
 
@@ -69,6 +63,8 @@ COMPILER_C_SRC = \
 	compiler/pipeline.c \
 	compiler/frontends/gpt2_prefill.c \
 	compiler/frontends/gpt2_decode.c \
+	compiler/frontends/gpt2_final.c \
+	compiler/frontends/classifier_softmax.c \
 	compiler/frontends/stories_train.c
 
 COMPILER_M_SRC = \
@@ -132,8 +128,8 @@ COMPILER_TEST_BINS = $(patsubst %,$(BUILDDIR)/tests/%,$(COMPILER_TEST_NAMES))
 
 all: orion
 
-# Build the CLI binary
-orion: $(ALL_OBJ)
+# Build the CLI binary (runtime + compiler objects)
+orion: $(ALL_OBJ) $(COMPILER_OBJ)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
 # Compile .m → .o (auto-create directories)
@@ -184,10 +180,10 @@ test-compiler: $(COMPILER_TEST_BINS)
 	echo "$$passed/$$total passed, $$failed failed"; \
 	if [ $$failed -gt 0 ]; then exit 1; fi
 
-# Build each test binary: compile test .m + link with all library .o files
-$(BUILDDIR)/tests/%: tests/%.m $(LIB_OBJ)
+# Build each test binary: compile test .m + link with all library + compiler .o files
+$(BUILDDIR)/tests/%: tests/%.m $(LIB_OBJ) $(COMPILER_OBJ)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIB_OBJ)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIB_OBJ) $(COMPILER_OBJ)
 
 # Build compiler test binaries: link with compiler objects only (+ Foundation)
 $(BUILDDIR)/tests/test_graph_ir: tests/test_graph_ir.m $(COMPILER_OBJ)

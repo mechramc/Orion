@@ -136,23 +136,23 @@ int orion_cmd_train(int argc, const char* argv[]) {
         const OrionModelConfig *cfg = &kStories110M;
 
         // Create trainer
-        fprintf(stderr, "Creating trainer (compiling %d ANE programs)...\n",
-                cfg->n_layer * 6);
         double t0 = time_seconds();
-        OrionTrainer *trainer = orion_trainer_create(cfg, args.weight_path);
-        if (!trainer) {
-            fprintf(stderr, "Error: failed to create trainer\n");
-            return 1;
-        }
-        double compile_time = time_seconds() - t0;
-        fprintf(stderr, "Compiled in %.1f s\n", compile_time);
-
-        trainer->lr = args.lr;
-
-        // Resume from checkpoint if specified
+        OrionTrainer *trainer;
         int start_step = 0;
         float last_loss = 0.0f;
+
         if (args.resume) {
+            // Deferred path: allocate + load weights, skip ANE compile.
+            // Checkpoint will overwrite CPU weights, then recompile bakes
+            // the correct (post-Adam) weights into ANE programs.
+            // This uses 72 compiles instead of 144 (which exceeds ~119 limit).
+            fprintf(stderr, "Creating trainer (deferred compile for resume)...\n");
+            trainer = orion_trainer_create_deferred(cfg, args.weight_path);
+            if (!trainer) {
+                fprintf(stderr, "Error: failed to create trainer\n");
+                return 1;
+            }
+
             fprintf(stderr, "Resuming from %s...\n", args.resume);
             if (!orion_checkpoint_load(trainer, args.resume, &start_step, &last_loss)) {
                 fprintf(stderr, "Error: failed to load checkpoint %s\n", args.resume);
@@ -161,7 +161,31 @@ int orion_cmd_train(int argc, const char* argv[]) {
             }
             fprintf(stderr, "Resumed at step %d, loss=%.4f, adam_t=%d\n",
                     start_step, last_loss, trainer->adam_t);
+
+            // Write checkpoint weights to BLOBFILEs, then compile with correct weights
+            fprintf(stderr, "Compiling %d ANE programs with resumed weights...\n",
+                    cfg->n_layer * 6);
+            if (!orion_trainer_recompile(trainer, args.weight_path)) {
+                fprintf(stderr, "Error: failed to compile ANE programs after resume\n");
+                orion_trainer_free(trainer);
+                return 1;
+            }
+
+        } else {
+            // Normal path: compile immediately with on-disk weights
+            fprintf(stderr, "Creating trainer (compiling %d ANE programs)...\n",
+                    cfg->n_layer * 6);
+            trainer = orion_trainer_create(cfg, args.weight_path);
+            if (!trainer) {
+                fprintf(stderr, "Error: failed to create trainer\n");
+                return 1;
+            }
         }
+
+        double compile_time = time_seconds() - t0;
+        fprintf(stderr, "Compiled in %.1f s\n", compile_time);
+
+        trainer->lr = args.lr;
 
         // Open data loader
         OrionDataLoader *dl = orion_data_loader_open(args.data_path, cfg->max_seq);

@@ -10,10 +10,14 @@
 #import "../../../core/profiler.h"
 #import "../../../model/weight_loader.h"
 #import "../../../model/configs/gpt2_124m.h"
-#import "../../../kernels/inference/gpt2_prefill_attn.milgen.h"
-#import "../../../kernels/inference/gpt2_prefill_ffn.milgen.h"
-#import "../../../kernels/inference/gpt2_final.milgen.h"
-#import "../../../kernels/inference/gpt2_decode_ane.milgen.h"
+#import "../../../compiler/kernel_adapter.h"
+#include "../../../compiler/frontends/gpt2_prefill.h"
+#include "../../../compiler/frontends/gpt2_final.h"
+#include "../../../compiler/frontends/gpt2_decode.h"
+#include "../../../compiler/validate.h"
+#include "../../../compiler/pipeline.h"
+#include "../../../compiler/codegen.h"
+#import "../../../core/mil_builder.h"
 #import "../../../kernels/inference/prefill_ane.h"
 #import "../../../kernels/inference/decode_ane.h"
 #import "../../../kernels/inference/decode_cpu.h"
@@ -501,7 +505,7 @@ static int bench_kernels(const char *model_dir, int iters, int bucket,
     const OrionModelConfig *cfg = &kGPT2_124M;
     int d = cfg->d_model;         // 768
     int hd = cfg->hidden_dim;     // 3072
-    int decode_seq = ORION_DECODE_SEQ;  // 16
+    int decode_seq = ORION_GRAPH_DECODE_SEQ;  // 16
 
     // Verify weights exist
     NSString *check = [NSString stringWithFormat:@"%@/layer0/ln1_g.bin", dir];
@@ -566,7 +570,7 @@ static int bench_kernels(const char *model_dir, int iters, int bucket,
     IOSurfaceRef pa_outs[] = {ioPrefillOut1, ioPrefillOut2, ioPrefillOut3};
     kernels[0] = (typeof(kernels[0])){
         .name = "prefill_attn_L0",
-        .mil = orion_milgen_gpt2_prefill_attn(0, bucket, cfg),
+        .mil = orion_kernel_adapter_generate_mil(orion_frontend_gpt2_prefill_attn, 0, bucket, cfg),
         .wdict = build_attn_wdict(0, bucket, dir),
         .ins = pa_ins, .n_in = 1, .outs = pa_outs, .n_out = 3,
         .in_bytes = prefill_bytes, .out_bytes = 3 * prefill_bytes,
@@ -578,7 +582,7 @@ static int bench_kernels(const char *model_dir, int iters, int bucket,
     IOSurfaceRef pf_outs[] = {ioPrefillOut1};
     kernels[1] = (typeof(kernels[1])){
         .name = "prefill_ffn_L0",
-        .mil = orion_milgen_gpt2_prefill_ffn(0, bucket, cfg),
+        .mil = orion_kernel_adapter_generate_mil(orion_frontend_gpt2_prefill_ffn, 0, bucket, cfg),
         .wdict = build_ffn_wdict(0, dir),
         .ins = pf_ins, .n_in = 1, .outs = pf_outs, .n_out = 1,
         .in_bytes = prefill_bytes, .out_bytes = prefill_bytes,
@@ -590,7 +594,14 @@ static int bench_kernels(const char *model_dir, int iters, int bucket,
     IOSurfaceRef fl_outs[] = {ioPrefillOut1};
     kernels[2] = (typeof(kernels[2])){
         .name = "final_ln",
-        .mil = orion_milgen_gpt2_final_ln(bucket, cfg),
+        .mil = ({
+            OrionGraph *_g = orion_frontend_gpt2_final_ln(bucket, cfg);
+            orion_graph_validate(_g);
+            orion_pipeline_optimize(_g);
+            NSString *_m = orion_codegen_mil(_g, "main");
+            orion_graph_free(_g);
+            _m;
+        }),
         .wdict = build_final_ln_wdict(dir),
         .ins = fl_ins, .n_in = 1, .outs = fl_outs, .n_out = 1,
         .in_bytes = prefill_bytes, .out_bytes = prefill_bytes,
@@ -602,7 +613,7 @@ static int bench_kernels(const char *model_dir, int iters, int bucket,
     IOSurfaceRef dp_outs[] = {ioDecodeOut1, ioDecodeOut2, ioDecodeOut3};
     kernels[3] = (typeof(kernels[3])){
         .name = "decode_proj_L0",
-        .mil = orion_milgen_gpt2_decode_proj(0, cfg),
+        .mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_gpt2_decode_proj, 0, cfg),
         .wdict = build_decode_proj_wdict(0, dir),
         .ins = dp_ins, .n_in = 1, .outs = dp_outs, .n_out = 3,
         .in_bytes = decode_bytes, .out_bytes = 3 * decode_bytes,
@@ -614,7 +625,7 @@ static int bench_kernels(const char *model_dir, int iters, int bucket,
     IOSurfaceRef df_outs[] = {ioDecodeOut1};
     kernels[4] = (typeof(kernels[4])){
         .name = "decode_ffn_L0",
-        .mil = orion_milgen_gpt2_decode_ffn(0, cfg),
+        .mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_gpt2_decode_ffn, 0, cfg),
         .wdict = build_decode_ffn_wdict(0, dir),
         .ins = df_ins, .n_in = 1, .outs = df_outs, .n_out = 1,
         .in_bytes = decode_bytes, .out_bytes = decode_bytes,
@@ -900,13 +911,13 @@ static int bench_training(int steps, int grad_accum, const char *weights_path,
                           bool save_baseline) {
     // Check weights exist
     NSString *dir = @(weights_path);
-    NSString *check = [dir stringByAppendingPathComponent:@"layer0/rms_att.bin"];
+    NSString *check = [dir stringByAppendingPathComponent:@"layer0/rms1.bin"];
     if (![[NSFileManager defaultManager] fileExistsAtPath:check]) {
         // Try alternate check for GPT-2 style
         check = [dir stringByAppendingPathComponent:@"embed.bin"];
         if (![[NSFileManager defaultManager] fileExistsAtPath:check]) {
             fprintf(stderr, "bench training: Stories110M weights not found at %s\n", weights_path);
-            fprintf(stderr, "Expected: %s/layer0/rms_att.bin or %s/embed.bin\n",
+            fprintf(stderr, "Expected: %s/layer0/rms1.bin or %s/embed.bin\n",
                     weights_path, weights_path);
             fprintf(stderr, "Skipping training benchmark.\n");
             return 0;

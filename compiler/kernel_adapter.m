@@ -40,6 +40,26 @@ NSString* orion_kernel_adapter_generate_mil(OrionFrontendFn frontend,
     return mil;
 }
 
+// Direct API: generate MIL from a 2-arg frontend (no bucket param).
+NSString* orion_kernel_adapter_generate_mil_2arg(OrionFrontend2Fn frontend,
+                                                  int layer_idx,
+                                                  const OrionModelConfig* cfg) {
+    OrionGraph* g = frontend(layer_idx, cfg);
+    if (!g) return nil;
+
+    OrionValidationResult vr = orion_graph_validate(g);
+    if (!vr.valid) {
+        NSLog(@"[kernel_adapter] validation failed: %s", vr.message);
+        orion_graph_free(g);
+        return nil;
+    }
+
+    orion_pipeline_optimize(g);
+    NSString* mil = orion_codegen_mil(g, "main");
+    orion_graph_free(g);
+    return mil;
+}
+
 // Registry-based generate_mil for use with OrionKernel.
 // Looks up the frontend by kernel name and calls adapter_generate_mil.
 static NSString* registry_gen_mil(int layer_idx __attribute__((unused)),

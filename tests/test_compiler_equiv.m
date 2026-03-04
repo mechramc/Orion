@@ -12,6 +12,8 @@
 #import "compiler/mil_diff.h"
 #include "compiler/frontends/gpt2_prefill.h"
 #include "compiler/frontends/gpt2_decode.h"
+#include "compiler/frontends/gpt2_final.h"
+#include "compiler/frontends/classifier_softmax.h"
 #include "compiler/frontends/stories_train.h"
 #include "compiler/model_config.h"
 
@@ -182,6 +184,61 @@ static bool test_stories_sdpa_bwd2(void) {
     return mil != nil && [mil containsString:@"dqf"] && [mil containsString:@"dkf"];
 }
 
+// Test: GPT-2 final LayerNorm generates valid MIL
+static bool test_gpt2_final_ln(void) {
+    // gpt2_final_ln takes (bucket, cfg) — not a standard 3-arg or 2-arg frontend
+    OrionGraph* g = orion_frontend_gpt2_final_ln(64, &kTestGPT2);
+    if (!g) return false;
+
+    OrionValidationResult vr = orion_graph_validate(g);
+    if (!vr.valid) { orion_graph_free(g); return false; }
+    orion_pipeline_optimize(g);
+    NSString* mil = orion_codegen_mil(g, "main");
+    orion_graph_free(g);
+
+    if (!mil) return false;
+    bool has_output = [mil containsString:@"hidden"];
+    bool has_weights = [mil containsString:@"ln_f_g.bin"];
+    return has_output && has_weights;
+}
+
+// Test: Classifier forward generates valid MIL
+static bool test_classifier_fwd(void) {
+    // classifier_fwd takes (dim, vocab) — standalone signature
+    OrionGraph* g = orion_frontend_classifier_fwd(768, 32000);
+    if (!g) return false;
+
+    OrionValidationResult vr = orion_graph_validate(g);
+    if (!vr.valid) { orion_graph_free(g); return false; }
+    orion_pipeline_optimize(g);
+    NSString* mil = orion_codegen_mil(g, "main");
+    orion_graph_free(g);
+
+    if (!mil) return false;
+    bool has_output = [mil containsString:@"output"];
+    bool has_conv = [mil containsString:@"conv("];
+    bool has_embed = [mil containsString:@"embed.bin"];
+    return has_output && has_conv && has_embed;
+}
+
+// Test: Vocab softmax generates valid MIL
+static bool test_vocab_softmax(void) {
+    // vocab_softmax takes (vocab, seq_len) — standalone signature
+    OrionGraph* g = orion_frontend_vocab_softmax(32000, 256);
+    if (!g) return false;
+
+    OrionValidationResult vr = orion_graph_validate(g);
+    if (!vr.valid) { orion_graph_free(g); return false; }
+    orion_pipeline_optimize(g);
+    NSString* mil = orion_codegen_mil(g, "main");
+    orion_graph_free(g);
+
+    if (!mil) return false;
+    bool has_output = [mil containsString:@"output"];
+    bool has_softmax = [mil containsString:@"softmax("];
+    return has_output && has_softmax;
+}
+
 // Test: Stories qkvBwd generates valid MIL
 static bool test_stories_qkv_bwd(void) {
     OrionGraph* g = orion_frontend_qkv_bwd(0, &kTestStories);
@@ -203,6 +260,9 @@ int main(int argc __attribute__((unused)), char* argv[] __attribute__((unused)))
         TEST(gpt2_prefill_ffn);
         TEST(gpt2_decode_proj);
         TEST(gpt2_decode_ffn);
+        TEST(gpt2_final_ln);
+        TEST(classifier_fwd);
+        TEST(vocab_softmax);
         TEST(stories_fwd_attn);
         TEST(stories_fwd_ffn);
         TEST(stories_ffn_bwd);

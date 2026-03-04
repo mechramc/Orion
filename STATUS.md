@@ -5,7 +5,9 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**Phase 12 — Stage 2: Orion Compiler (COMPLETE)** — All 24 tasks (T117-T140) across 4 sub-phases done. Graph IR with ~27 ops, fluent builder API, MIL codegen, 5 optimization passes (DCE, identity, cast, conv+bias, pipeline), 3 ANE-specific passes (SRAM, uniform outputs, ANE validate), 10 compiler frontends (4 GPT-2 + 6 Stories training), kernel adapter, MIL diff tool. 32/32 compiler tests pass.
+**Phase 13 — Milgen→Compiler Swap (COMPLETE)** — All 8 tasks (T141-T148). Replaced hand-written milgen MIL generators with compiler-generated equivalents across all callers. Added 3 missing frontends (gpt2_final_ln, classifier_fwd, vocab_softmax). Fixed 4 compiler bugs (matmul inline bools, identity output refs, conv_bias fusion, scalar binary shapes). Archived 13 milgen files. 21/21 tests pass. 148/148 tasks done.
+
+**Session 14 — Training NaN Fix (COMPLETE)** — Fixed 3 bugs causing NaN cascade in training: (1) stale ANE programs on checkpoint resume → deferred compilation, (2) fp16 overflow cascade → activation clamping, (3) corrupted BLOBFILE weights → gradient sanitization. Verified with 5-step resume chain: loss 13.98→13.92, 0 NaN. 21/21 tests pass.
 
 ## Milestone Progress
 
@@ -211,6 +213,18 @@
 | Equivalence tests | T139 | L | **DONE** |
 | Makefile + benchmark | T140 | M | **DONE** |
 
+### Phase 13 — Replace milgen with compiler-generated MIL
+| Task | ID | Size | Status |
+|------|----|------|--------|
+| Final LN frontend | T141 | M | **DONE** |
+| Classifier + softmax frontends | T142 | M | **DONE** |
+| Kernel adapter 2-arg variant | T143 | S | **DONE** |
+| Swap prefill_ane.m | T144 | M | **DONE** |
+| Swap decode_ane.m | T145 | M | **DONE** |
+| Swap stories_train.m | T146 | M | **DONE** |
+| Equiv tests for new frontends | T147 | M | **DONE** |
+| Archive milgen + update Makefile | T148 | M | **DONE** |
+
 ## Task Progress
 - **M0**: 11/11 complete (ALL DONE)
 - **M1**: 35/35 complete (ALL DONE)
@@ -224,7 +238,8 @@
 - **Phase 10 (Abstractions)**: 5/5 complete (ALL DONE)
 - **Phase 11 (Build Quality)**: 3/3 complete (ALL DONE)
 - **Phase 12 (Compiler)**: 24/24 complete (ALL DONE)
-- **Grand Total**: 132/140 complete (0 in progress). 1 cut (T090). 4 deferred (T091-T093, T095).
+- **Phase 13 (milgen→compiler)**: 8/8 complete (ALL DONE)
+- **Grand Total**: 140/148 complete (0 in progress). 1 cut (T090). 4 deferred (T091-T093, T095).
 - **Remaining**: M6 stretch (T096-T098) + M5 deferred (T091-T093, T095)
 
 ## Decisions Log
@@ -249,6 +264,9 @@
 | 2026-03-04 | DCE uses is_live flag (no index compaction) | Avoids rewriting all input references; dead nodes marked !is_live, skipped by codegen |
 | 2026-03-03 | Decode uses seq=16 (not seq=1) as minimum ANE bucket | ANE requires ~49KB minimum IOSurface allocation; seq=1 tensors fail at eval even though they compile |
 | 2026-03-03 | ANE multi-output surfaces ordered alphabetically by MIL name | Output surfaces must be provided in alphabetical order of their MIL variable names, not return tuple order |
+| 2026-03-04 | Replace milgen with compiler-generated MIL | All 13 kernel types now use compiler frontends; milgen files archived to archive/milgen/ for reference |
+| 2026-03-04 | Deferred ANE compilation for training resume | Compile ANE programs after checkpoint load, not before — prevents stale weight programs |
+| 2026-03-04 | fp16 activation clamping + gradient sanitization | Clamp activations to fp16 range before softmax/LN; sanitize gradients before BLOBFILE write — eliminates NaN cascade |
 
 ## Blockers
 - **None** — Phases 0-12 complete. Stage 1 + Stage 2 done.

@@ -346,3 +346,33 @@ NSString* orion_mil_causal_attention(const char* prefix,
 
     return m;
 }
+
+#pragma mark - Causal Mask Utilities
+
+NSData* orion_make_causal_mask_blob(int seq_len) {
+    int count = seq_len * seq_len;
+    int data_bytes = count * (int)sizeof(_Float16);
+    int total = 128 + data_bytes;
+    uint8_t *buf = (uint8_t *)calloc(total, 1);
+
+    // BLOBFILE header
+    buf[0] = 1; buf[4] = 2;
+    buf[64] = 0xEF; buf[65] = 0xBE; buf[66] = 0xAD; buf[67] = 0xDE;
+    buf[68] = 1;
+    *(uint32_t *)(buf + 72) = data_bytes;
+    *(uint32_t *)(buf + 80) = 128;
+
+    // Fill causal mask: 0 for j <= i, -1e4 for j > i
+    _Float16 *fp16 = (_Float16 *)(buf + 128);
+    for (int i = 0; i < seq_len; i++) {
+        for (int j = 0; j < seq_len; j++) {
+            fp16[i * seq_len + j] = (j <= i) ? (_Float16)0.0f : (_Float16)(-1e4f);
+        }
+    }
+
+    return [NSData dataWithBytesNoCopy:buf length:total freeWhenDone:YES];
+}
+
+NSString* orion_causal_mask_path(int seq_len) {
+    return [NSString stringWithFormat:@"@model_path/masks/causal_%d.bin", seq_len];
+}

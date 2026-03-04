@@ -2,9 +2,13 @@
 #import "core/ane_runtime.h"
 #import "core/iosurface_tensor.h"
 #import "model/configs/stories110m.h"
-#import "kernels/training/stories_train_kernels.milgen.h"
-#import "kernels/training/classifier_softmax.milgen.h"
-#import "kernels/inference/gpt2_prefill_attn.milgen.h" // for causal mask
+#include "compiler/kernel_adapter.h"
+#include "compiler/frontends/stories_train.h"
+#include "compiler/frontends/classifier_softmax.h"
+#include "compiler/validate.h"
+#include "compiler/pipeline.h"
+#include "compiler/codegen.h"
+#import "core/mil_builder.h"
 
 static int g_pass = 0, g_fail = 0;
 
@@ -51,7 +55,7 @@ static NSDictionary* make_random_wdict(NSArray<NSString*>* paths, NSArray<NSNumb
 #pragma mark - T064: fwdAttn MIL Generation + Compile Tests
 
 static void test_fwd_attn_milgen(void) {
-    NSString *mil = orion_milgen_fwd_attn(0, &kStories110M);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_fwd_attn, 0, &kStories110M);
     ASSERT(mil != nil, @"should generate MIL");
     ASSERT(mil.length > 100, @"MIL should be non-trivial");
     ASSERT([mil containsString:@"rms1"], @"should contain RMSNorm");
@@ -59,14 +63,14 @@ static void test_fwd_attn_milgen(void) {
     ASSERT([mil containsString:@"matmul"], @"should contain matmul (attention)");
     ASSERT([mil containsString:@"softmax"], @"should contain softmax");
     // Multi-output: should return 6 fp16 outputs
-    ASSERT([mil containsString:@"-> (wo_out, q_out, k_out, v_out, attn_out, rms1_out)"], @"should have 6 outputs");
+    ASSERT([mil containsString:@"-> (wo_conv, q_conv, k_conv, v_conv, attn_out, rms1_out)"], @"should have 6 outputs");
     PASS();
 }
 
 static void test_fwd_attn_compile(void) {
     orion_ane_init();
 
-    NSString *mil = orion_milgen_fwd_attn(0, &kStories110M);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_fwd_attn, 0, &kStories110M);
     int d = kStories110M.d_model;
     int s = kStories110M.max_seq;
 
@@ -96,7 +100,7 @@ static void test_fwd_attn_compile(void) {
 static void test_fwd_attn_eval(void) {
     orion_ane_init();
 
-    NSString *mil = orion_milgen_fwd_attn(0, &kStories110M);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_fwd_attn, 0, &kStories110M);
     int d = kStories110M.d_model;
     int s = kStories110M.max_seq;
 
@@ -153,18 +157,18 @@ static void test_fwd_attn_eval(void) {
 #pragma mark - T065: fwdFFN Tests
 
 static void test_fwd_ffn_milgen(void) {
-    NSString *mil = orion_milgen_fwd_ffn(0, &kStories110M);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_fwd_ffn, 0, &kStories110M);
     ASSERT(mil != nil, @"should generate MIL");
     ASSERT([mil containsString:@"sigmoid"], @"should contain sigmoid (for SiLU)");
     // Multi-output: 5 fp16 outputs
-    ASSERT([mil containsString:@"-> (w2_out, w1_out, w3_out, gate, rms2_out)"], @"should have 5 outputs");
+    ASSERT([mil containsString:@"-> (w2_conv, w1_conv, w3_conv, gate, rms2_out)"], @"should have 5 outputs");
     PASS();
 }
 
 static void test_fwd_ffn_compile(void) {
     orion_ane_init();
 
-    NSString *mil = orion_milgen_fwd_ffn(0, &kStories110M);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_fwd_ffn, 0, &kStories110M);
     int d = kStories110M.d_model;
     int h = kStories110M.hidden_dim;
 
@@ -184,7 +188,7 @@ static void test_fwd_ffn_compile(void) {
 static void test_fwd_ffn_eval(void) {
     orion_ane_init();
 
-    NSString *mil = orion_milgen_fwd_ffn(0, &kStories110M);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_fwd_ffn, 0, &kStories110M);
     int d = kStories110M.d_model;
     int h = kStories110M.hidden_dim;
     int s = kStories110M.max_seq;
@@ -241,7 +245,7 @@ static void test_fwd_ffn_eval(void) {
 #pragma mark - T066: ffnBwd Tests
 
 static void test_ffn_bwd_milgen(void) {
-    NSString *mil = orion_milgen_ffn_bwd(0, &kStories110M);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_ffn_bwd, 0, &kStories110M);
     ASSERT(mil != nil, @"should generate MIL");
     ASSERT([mil containsString:@"sigmoid"], @"should contain sigmoid (SiLU backward)");
     ASSERT([mil containsString:@"slice_by_index"], @"should slice concatenated input");
@@ -251,7 +255,7 @@ static void test_ffn_bwd_milgen(void) {
 static void test_ffn_bwd_compile(void) {
     orion_ane_init();
 
-    NSString *mil = orion_milgen_ffn_bwd(0, &kStories110M);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_ffn_bwd, 0, &kStories110M);
     int d = kStories110M.d_model;
     int h = kStories110M.hidden_dim;
 
@@ -271,7 +275,7 @@ static void test_ffn_bwd_compile(void) {
 #pragma mark - T067: sdpaBwd1 Tests
 
 static void test_sdpa_bwd1_milgen(void) {
-    NSString *mil = orion_milgen_sdpa_bwd1(0, &kStories110M);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_sdpa_bwd1, 0, &kStories110M);
     ASSERT(mil != nil, @"should generate MIL");
     ASSERT([mil containsString:@"matmul"], @"should contain matmul");
     ASSERT([mil containsString:@"softmax"], @"should recompute softmax");
@@ -281,7 +285,7 @@ static void test_sdpa_bwd1_milgen(void) {
 static void test_sdpa_bwd1_compile(void) {
     orion_ane_init();
 
-    NSString *mil = orion_milgen_sdpa_bwd1(0, &kStories110M);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_sdpa_bwd1, 0, &kStories110M);
     int d = kStories110M.d_model;
     int s = kStories110M.max_seq;
 
@@ -302,7 +306,7 @@ static void test_sdpa_bwd1_compile(void) {
 #pragma mark - T068: sdpaBwd2 Tests
 
 static void test_sdpa_bwd2_milgen(void) {
-    NSString *mil = orion_milgen_sdpa_bwd2(0, &kStories110M);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_sdpa_bwd2, 0, &kStories110M);
     ASSERT(mil != nil, @"should generate MIL");
     ASSERT([mil containsString:@"reduce_sum"], @"should reduce_sum (softmax backward)");
     PASS();
@@ -311,7 +315,7 @@ static void test_sdpa_bwd2_milgen(void) {
 static void test_sdpa_bwd2_compile(void) {
     orion_ane_init();
 
-    NSString *mil = orion_milgen_sdpa_bwd2(0, &kStories110M);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_sdpa_bwd2, 0, &kStories110M);
     // No weight blobs (weight-free kernel)
     NSDictionary *wdict = @{};
     OrionProgram *prog = orion_compile_mil(mil.UTF8String, wdict, NULL);
@@ -324,7 +328,7 @@ static void test_sdpa_bwd2_compile(void) {
 #pragma mark - T069: qkvBwd Tests
 
 static void test_qkv_bwd_milgen(void) {
-    NSString *mil = orion_milgen_qkv_bwd(0, &kStories110M);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_qkv_bwd, 0, &kStories110M);
     ASSERT(mil != nil, @"should generate MIL");
     ASSERT([mil containsString:@"conv"], @"should contain conv (transpose projections)");
     PASS();
@@ -333,7 +337,7 @@ static void test_qkv_bwd_milgen(void) {
 static void test_qkv_bwd_compile(void) {
     orion_ane_init();
 
-    NSString *mil = orion_milgen_qkv_bwd(0, &kStories110M);
+    NSString *mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_qkv_bwd, 0, &kStories110M);
     int d = kStories110M.d_model;
 
     NSArray *paths = @[@"layer0/wqt.bin", @"layer0/wkt.bin", @"layer0/wvt.bin"];
@@ -350,14 +354,22 @@ static void test_qkv_bwd_compile(void) {
 #pragma mark - T070-T071: Classifier + Softmax Tests
 
 static void test_classifier_milgen(void) {
-    NSString *mil = orion_milgen_classifier_fwd(768, 32000);
+    OrionGraph* _g = orion_frontend_classifier_fwd(768, 32000);
+    OrionValidationResult _vr = orion_graph_validate(_g);
+    orion_pipeline_optimize(_g);
+    NSString *mil = orion_codegen_mil(_g, "main");
+    orion_graph_free(_g);
     ASSERT(mil != nil, @"should generate MIL");
     ASSERT([mil containsString:@"conv"], @"should contain conv (classifier)");
     PASS();
 }
 
 static void test_softmax_milgen(void) {
-    NSString *mil = orion_milgen_vocab_softmax(32000, 256);
+    OrionGraph* _g = orion_frontend_vocab_softmax(32000, 256);
+    OrionValidationResult _vr = orion_graph_validate(_g);
+    orion_pipeline_optimize(_g);
+    NSString *mil = orion_codegen_mil(_g, "main");
+    orion_graph_free(_g);
     ASSERT(mil != nil, @"should generate MIL");
     ASSERT([mil containsString:@"softmax"], @"should contain softmax");
     PASS();

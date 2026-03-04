@@ -16,7 +16,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from hf_to_blobs_gpt2 import convert_tensor_to_blob
+from hf_to_blobs_gpt2 import convert_tensor_to_blob, make_blob_header
 
 
 def read_llama2c_checkpoint(checkpoint_path: str):
@@ -106,10 +106,35 @@ def read_llama2c_checkpoint(checkpoint_path: str):
     return config, weights
 
 
+def make_causal_mask_blob(seq_len: int, output_path: str):
+    """Generate causal mask BLOBFILE: fp16 [seq, seq], 0 for j<=i, -1e4 for j>i.
+
+    Matches orion_make_causal_mask_blob() in core/mil_builder.m.
+    """
+    mask = np.zeros((seq_len, seq_len), dtype=np.float16)
+    for i in range(seq_len):
+        for j in range(i + 1, seq_len):
+            mask[i, j] = np.float16(-1e4)
+    data = mask.tobytes()
+    header = make_blob_header(len(data))
+    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+    with open(output_path, 'wb') as f:
+        f.write(header)
+        f.write(data)
+    return len(data)
+
+
 def convert_stories(checkpoint_path: str, output_dir: str):
-    """Convert Stories110M checkpoint to BLOBFILE blobs."""
+    """Convert Stories110M checkpoint to BLOBFILE blobs.
+
+    Generates:
+      - Forward weights: embed, rms1/rms2, wq/wk/wv/wo, w1/w2/w3, rms_final
+      - Transposed weights for backward: wqt/wkt/wvt/wot, w1t/w2t/w3t
+      - Causal masks: masks/causal_{32,64,128,256,512,1024}.bin
+    """
     config, weights = read_llama2c_checkpoint(checkpoint_path)
     n_layers = config['n_layers']
+    seq_len = config['seq_len']
 
     os.makedirs(output_dir, exist_ok=True)
     total_bytes = 0
@@ -124,6 +149,15 @@ def convert_stories(checkpoint_path: str, output_dir: str):
         file_count += 1
         print(f"  {name}: {tensor.shape} → {sz} bytes fp16")
 
+    def save_transposed(name, tensor):
+        nonlocal total_bytes, file_count
+        path = os.path.join(output_dir, name)
+        os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+        sz = convert_tensor_to_blob(tensor.T.copy(), path)
+        total_bytes += sz
+        file_count += 1
+        print(f"  {name}: {tensor.T.shape} → {sz} bytes fp16 (transposed)")
+
     # Token embeddings
     save("embed.bin", weights['embed'])
 
@@ -132,18 +166,40 @@ def convert_stories(checkpoint_path: str, output_dir: str):
         ldir = f"layer{i}"
         os.makedirs(os.path.join(output_dir, ldir), exist_ok=True)
 
-        save(f"{ldir}/rms_att.bin", weights['rms_att'][i])
+        # Forward weights (rms1/rms2 naming matches compiler frontends)
+        save(f"{ldir}/rms1.bin", weights['rms_att'][i])
         save(f"{ldir}/wq.bin", weights['wq'][i])
         save(f"{ldir}/wk.bin", weights['wk'][i])
         save(f"{ldir}/wv.bin", weights['wv'][i])
         save(f"{ldir}/wo.bin", weights['wo'][i])
-        save(f"{ldir}/rms_ffn.bin", weights['rms_ffn'][i])
+        save(f"{ldir}/rms2.bin", weights['rms_ffn'][i])
         save(f"{ldir}/w1.bin", weights['w1'][i])
         save(f"{ldir}/w2.bin", weights['w2'][i])
         save(f"{ldir}/w3.bin", weights['w3'][i])
 
+        # Transposed weights for backward pass
+        save_transposed(f"{ldir}/wqt.bin", weights['wq'][i])
+        save_transposed(f"{ldir}/wkt.bin", weights['wk'][i])
+        save_transposed(f"{ldir}/wvt.bin", weights['wv'][i])
+        save_transposed(f"{ldir}/wot.bin", weights['wo'][i])
+        save_transposed(f"{ldir}/w1t.bin", weights['w1'][i])
+        save_transposed(f"{ldir}/w2t.bin", weights['w2'][i])
+        save_transposed(f"{ldir}/w3t.bin", weights['w3'][i])
+
     # Final RMS norm
     save("rms_final.bin", weights['rms_final'])
+
+    # Causal masks for all standard bucket sizes used in inference and training
+    # Training uses max_seq=256, inference uses buckets 32/64/128/256/512/1024
+    bucket_sizes = [32, 64, 128, 256, 512, 1024]
+    for bs in bucket_sizes:
+        if bs > seq_len:
+            break
+        mask_path = os.path.join(output_dir, f"masks/causal_{bs}.bin")
+        mask_sz = make_causal_mask_blob(bs, mask_path)
+        total_bytes += mask_sz
+        file_count += 1
+        print(f"  masks/causal_{bs}.bin: [{bs}, {bs}] → {mask_sz} bytes fp16")
 
     print(f"\nDone: {file_count} files, {total_bytes / 1024 / 1024:.1f} MB total (fp16)")
     print(f"Output: {output_dir}")

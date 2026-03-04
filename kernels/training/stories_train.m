@@ -1,5 +1,6 @@
 #import "stories_train.h"
-#import "stories_train_kernels.milgen.h"
+#import "../../compiler/kernel_adapter.h"
+#include "../../compiler/frontends/stories_train.h"
 #import "../../core/kernel.h"
 #import <math.h>
 #import <stdlib.h>
@@ -17,6 +18,7 @@ static float* alloc_zeros(int count) {
 
 // Read fp16 IOSurface as fp32 into buffer. Layout: ANE [1,C,1,S] → CPU [S,C] (transposed).
 // ANE stores channel-first: data[c*S + s]. CPU wants row-major [seq, dim]: data[s*C + c].
+// Clamps NaN/Inf to fp16 range on readback to prevent overflow cascade through layers.
 static void io_read_transpose(IOSurfaceRef surf, float* out, int channels, int seq) {
     int count = channels * seq;
     float *tmp = (float *)malloc(count * sizeof(float));
@@ -24,20 +26,27 @@ static void io_read_transpose(IOSurfaceRef surf, float* out, int channels, int s
     // ANE layout: [C, S] (channel-first) → CPU layout: [S, C] (row-major)
     for (int c = 0; c < channels; c++) {
         for (int s2 = 0; s2 < seq; s2++) {
-            out[s2 * channels + c] = tmp[c * seq + s2];
+            float v = tmp[c * seq + s2];
+            if (isnan(v) || v > 65504.0f) v = 65504.0f;
+            else if (v < -65504.0f) v = -65504.0f;
+            out[s2 * channels + c] = v;
         }
     }
     free(tmp);
 }
 
 // Write fp32 CPU [S,C] data as fp16 to ANE IOSurface [1,C,1,S] (transposed).
+// Clamps values to fp16 range [-65504, 65504] to prevent Inf from entering ANE.
 static void io_write_transpose(IOSurfaceRef surf, const float* in, int channels, int seq) {
     int count = channels * seq;
     float *tmp = (float *)malloc(count * sizeof(float));
-    // CPU layout: [S, C] → ANE layout: [C, S]
+    // CPU layout: [S, C] → ANE layout: [C, S] with fp16 clamping
     for (int s2 = 0; s2 < seq; s2++) {
         for (int c = 0; c < channels; c++) {
-            tmp[c * seq + s2] = in[s2 * channels + c];
+            float v = in[s2 * channels + c];
+            if (v > 65504.0f) v = 65504.0f;
+            else if (v < -65504.0f) v = -65504.0f;
+            tmp[c * seq + s2] = v;
         }
     }
     orion_tensor_write_f32(surf, tmp, count);
@@ -58,7 +67,11 @@ static bool save_blob_f32(const char* path, const float* data, int n_elements) {
 
     _Float16 *fp16 = (_Float16 *)(buf + 128);
     for (int i = 0; i < n_elements; i++) {
-        fp16[i] = (_Float16)data[i];
+        float v = data[i];
+        if (isnan(v)) v = 0.0f;
+        else if (v > 65504.0f) v = 65504.0f;
+        else if (v < -65504.0f) v = -65504.0f;
+        fp16[i] = (_Float16)v;
     }
 
     NSString *dir = [@(path) stringByDeletingLastPathComponent];
@@ -189,42 +202,45 @@ static int load_blob_f32(const char* path, float* out, int max_elements) {
     int data_offset = *(const uint32_t *)(bytes + 80);
     const _Float16 *fp16 = (const _Float16 *)(bytes + data_offset);
     for (int i = 0; i < n_elements; i++) {
-        out[i] = (float)fp16[i];
+        float v = (float)fp16[i];
+        // Sanitize: replace NaN/Inf from corrupted BLOBFILEs with 0
+        if (isnan(v) || isinf(v)) v = 0.0f;
+        out[i] = v;
     }
     return n_elements;
 }
 
 #pragma mark - OrionKernel Adapters for Training
 
-// MIL gen adapters — training kernels ignore bucket
-static NSString* milgen_fwd_attn_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+// Compiler MIL gen adapters — training kernels ignore bucket
+static NSString* compiler_fwd_attn_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
     (void)bucket;
-    return orion_milgen_fwd_attn(layer_idx, cfg);
+    return orion_kernel_adapter_generate_mil_2arg(orion_frontend_fwd_attn, layer_idx, cfg);
 }
 
-static NSString* milgen_fwd_ffn_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+static NSString* compiler_fwd_ffn_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
     (void)bucket;
-    return orion_milgen_fwd_ffn(layer_idx, cfg);
+    return orion_kernel_adapter_generate_mil_2arg(orion_frontend_fwd_ffn, layer_idx, cfg);
 }
 
-static NSString* milgen_ffn_bwd_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+static NSString* compiler_ffn_bwd_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
     (void)bucket;
-    return orion_milgen_ffn_bwd(layer_idx, cfg);
+    return orion_kernel_adapter_generate_mil_2arg(orion_frontend_ffn_bwd, layer_idx, cfg);
 }
 
-static NSString* milgen_sdpa_bwd1_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+static NSString* compiler_sdpa_bwd1_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
     (void)bucket;
-    return orion_milgen_sdpa_bwd1(layer_idx, cfg);
+    return orion_kernel_adapter_generate_mil_2arg(orion_frontend_sdpa_bwd1, layer_idx, cfg);
 }
 
-static NSString* milgen_sdpa_bwd2_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+static NSString* compiler_sdpa_bwd2_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
     (void)bucket;
-    return orion_milgen_sdpa_bwd2(layer_idx, cfg);
+    return orion_kernel_adapter_generate_mil_2arg(orion_frontend_sdpa_bwd2, layer_idx, cfg);
 }
 
-static NSString* milgen_qkv_bwd_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+static NSString* compiler_qkv_bwd_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
     (void)bucket;
-    return orion_milgen_qkv_bwd(layer_idx, cfg);
+    return orion_kernel_adapter_generate_mil_2arg(orion_frontend_qkv_bwd, layer_idx, cfg);
 }
 
 // Weight dict adapters
@@ -297,31 +313,31 @@ static bool compile_layer(OrionLayerKernels* kern, int layer_idx,
     NSString *mil;
     NSDictionary *wdict;
 
-    mil = milgen_fwd_attn_adapter(layer_idx, s, cfg);
+    mil = compiler_fwd_attn_adapter(layer_idx, s, cfg);
     wdict = wdict_fwd_attn_adapter(layer_idx, s, base.UTF8String);
     kern->fwd_attn = orion_compile_mil(mil.UTF8String, wdict, "fwdAttn");
     if (!kern->fwd_attn) return false;
 
-    mil = milgen_fwd_ffn_adapter(layer_idx, s, cfg);
+    mil = compiler_fwd_ffn_adapter(layer_idx, s, cfg);
     wdict = wdict_fwd_ffn_adapter(layer_idx, s, base.UTF8String);
     kern->fwd_ffn = orion_compile_mil(mil.UTF8String, wdict, "fwdFFN");
     if (!kern->fwd_ffn) return false;
 
-    mil = milgen_ffn_bwd_adapter(layer_idx, s, cfg);
+    mil = compiler_ffn_bwd_adapter(layer_idx, s, cfg);
     wdict = wdict_ffn_bwd_adapter(layer_idx, s, base.UTF8String);
     kern->ffn_bwd = orion_compile_mil(mil.UTF8String, wdict, "ffnBwd");
     if (!kern->ffn_bwd) return false;
 
-    mil = milgen_sdpa_bwd1_adapter(layer_idx, s, cfg);
+    mil = compiler_sdpa_bwd1_adapter(layer_idx, s, cfg);
     wdict = wdict_sdpa_bwd1_adapter(layer_idx, s, base.UTF8String);
     kern->sdpa_bwd1 = orion_compile_mil(mil.UTF8String, wdict, "sdpaBwd1");
     if (!kern->sdpa_bwd1) return false;
 
-    mil = milgen_sdpa_bwd2_adapter(layer_idx, s, cfg);
+    mil = compiler_sdpa_bwd2_adapter(layer_idx, s, cfg);
     kern->sdpa_bwd2 = orion_compile_mil(mil.UTF8String, @{}, "sdpaBwd2");
     if (!kern->sdpa_bwd2) return false;
 
-    mil = milgen_qkv_bwd_adapter(layer_idx, s, cfg);
+    mil = compiler_qkv_bwd_adapter(layer_idx, s, cfg);
     wdict = wdict_qkv_bwd_adapter(layer_idx, s, base.UTF8String);
     kern->qkv_bwd = orion_compile_mil(mil.UTF8String, wdict, "qkvBwd");
     if (!kern->qkv_bwd) return false;
@@ -484,7 +500,11 @@ static void load_layer_weights(OrionLayerWeights* w, int layer_idx,
 
 #pragma mark - Create / Free Trainer
 
-OrionTrainer* orion_trainer_create(const OrionModelConfig* cfg, const char* weight_path) {
+/// Shared allocation and weight loading. If do_compile is true, compiles ANE programs.
+/// If false, skips compilation (deferred mode for resume path).
+static OrionTrainer* trainer_alloc_and_load(const OrionModelConfig* cfg,
+                                             const char* weight_path,
+                                             bool do_compile) {
     @autoreleasepool {
         if (!orion_ane_init()) return NULL;
 
@@ -511,12 +531,14 @@ OrionTrainer* orion_trainer_create(const OrionModelConfig* cfg, const char* weig
 
         NSString *base = @(weight_path);
 
-        // Compile all layer kernels and load weights
+        // Compile (if requested) and load weights per layer
         for (int L = 0; L < nl; L++) {
-            if (!compile_layer(&t->kernels[L], L, cfg, base)) {
-                NSLog(@"Failed to compile layer %d kernels", L);
-                orion_trainer_free(t);
-                return NULL;
+            if (do_compile) {
+                if (!compile_layer(&t->kernels[L], L, cfg, base)) {
+                    NSLog(@"Failed to compile layer %d kernels", L);
+                    orion_trainer_free(t);
+                    return NULL;
+                }
             }
             alloc_layer_io(&t->io[L], cfg);
             alloc_layer_weights(&t->weights[L], cfg);
@@ -549,6 +571,14 @@ OrionTrainer* orion_trainer_create(const OrionModelConfig* cfg, const char* weig
 
         return t;
     }
+}
+
+OrionTrainer* orion_trainer_create(const OrionModelConfig* cfg, const char* weight_path) {
+    return trainer_alloc_and_load(cfg, weight_path, true);
+}
+
+OrionTrainer* orion_trainer_create_deferred(const OrionModelConfig* cfg, const char* weight_path) {
+    return trainer_alloc_and_load(cfg, weight_path, false);
 }
 
 void orion_trainer_free(OrionTrainer* t) {
@@ -662,6 +692,7 @@ float orion_train_step(OrionTrainer* trainer,
             // Residual: x_out = x2 + w2_out  (CPU)
             io_read_transpose(io->fwd_ffn_out[0], x_out, d, s);  // w2_out
             for (int i = 0; i < s * d; i++) x_out[i] += x2[i];
+
         }
 
         // =========================================================

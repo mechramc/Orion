@@ -18,7 +18,9 @@ void orion_pipeline_optimize(OrionGraph* graph) {
         bool changed = false;
         changed |= orion_pass_identity(graph);
         changed |= orion_pass_cast(graph);
-        changed |= orion_pass_conv_bias(graph);
+        // conv_bias fusion disabled: ANE MIL doesn't support bias= in conv op.
+        // Bias stays as separate add(conv, bias) node.
+        // changed |= orion_pass_conv_bias(graph);
         changed |= orion_pass_dce(graph);
         if (!changed) break;
     }

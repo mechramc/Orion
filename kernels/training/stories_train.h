@@ -135,6 +135,12 @@ typedef struct {
 /// Returns NULL on failure.
 OrionTrainer* orion_trainer_create(const OrionModelConfig* cfg, const char* weight_path);
 
+/// Create trainer without compiling ANE programs (deferred compilation).
+/// Use for resume path: create_deferred → checkpoint_load → recompile.
+/// This avoids compiling with stale weights then recompiling with correct weights,
+/// keeping total compiles at 72 instead of 144 (which exceeds the ~119 limit).
+OrionTrainer* orion_trainer_create_deferred(const OrionModelConfig* cfg, const char* weight_path);
+
 /// Run one training step. Returns loss value.
 /// input_tokens: [seq_len] token IDs
 /// target_tokens: [seq_len] target token IDs (input shifted by 1)
