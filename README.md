@@ -89,7 +89,7 @@ Orion builds on foundational work by [maderix](https://github.com/maderix/ANE) (
   --resume checkpoints/step_50.bin
 ```
 
-Training runs: ANE forward/backward → CPU weight updates → Adam optimizer → checkpoint → `exec()` restart with updated weights. Each process compiles ANE programs once (72 programs per step), then restarts to stay within the ~119 compile budget. Resume from any checkpoint is verified stable (5-step chain, 0 NaN).
+Training runs: ANE forward/backward → CPU weight updates → Adam optimizer → checkpoint → `exec()` restart with updated weights. Each process compiles ANE programs once (72 programs per step), then restarts to stay within the ~119 compile budget. Verified stable over **1,000 steps** (loss: 12.3→6.2, 0 NaN) and a **5-chain × 5-step stress test** (25 total steps, 0 NaN, all chains monotonically decreasing).
 
 ### Benchmarking
 

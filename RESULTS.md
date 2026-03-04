@@ -25,28 +25,39 @@ Three inference modes: CPU-only, ANE prefill + CPU decode (hybrid), and ANE full
 
 | Metric | Value |
 |--------|-------|
-| Step time | ~960 ms |
-| Throughput | 0.58 TFLOPS |
+| Step time (mean ± std) | **908 ± 16 ms** |
+| Throughput | 0.612 TFLOPS |
 | Gradient accumulation | 4 microbatches |
-| Learning rate | 1e-5 |
 | Compile budget | 72 programs/process → 1 step/process → auto-restart via `exec()` |
 
-### Stability Verification
+### 1000-Step Training Run (lr=3e-4)
 
-5-step resume chain verified end-to-end:
+| Metric | Value |
+|--------|-------|
+| Total steps | 1,000 |
+| Initial loss | 12.29 |
+| Minimum loss | 6.19 (step 888) |
+| Final loss | 6.55 |
+| NaN occurrences | **0 / 1,000** |
+| Wall time | ~90 minutes |
 
-| Step | Loss |
-|------|------|
-| 1 | 13.98 |
-| 2 | 13.97 |
-| 3 | 13.95 |
-| 4 | 13.94 |
-| 5 | 13.92 |
+Loss dropped 50% (12.3→6.2) with zero NaN across all 1,000 steps. Each step runs in a separate process via `exec()` restart. Oscillations are from a fixed high learning rate without warmup/decay — the training loop itself is numerically stable.
 
-- **0 NaN** across all 5 steps
-- Loss monotonically decreasing
+### Stability Stress Test (5 chains × 5 steps, lr=1e-5)
+
+| Chain | Step 1 | Step 2 | Step 3 | Step 4 | Step 5 |
+|-------|--------|--------|--------|--------|--------|
+| 1 | 13.979 | 13.968 | 13.946 | 13.932 | 13.923 |
+| 2 | 13.978 | 13.965 | 13.949 | 13.927 | 13.916 |
+| 3 | 13.975 | 13.962 | 13.945 | 13.924 | 13.911 |
+| 4 | 13.974 | 13.961 | 13.941 | 13.926 | 13.911 |
+| 5 | 13.971 | 13.958 | 13.935 | 13.920 | 13.904 |
+
+- **0 NaN** across all 25 steps (5 chains × 5 steps)
+- All 5 chains monotonically decreasing
+- Cross-chain loss std: 0.003 (step 1) → 0.007 (step 5)
 - Each step runs in a fresh process (compile budget management via `exec()`)
-- Checkpoint resume verified: weights, optimizer state, and step counter all restored correctly
+- 25/25 `exec()` restarts successful, checkpoint resume verified
 
 ---
 
