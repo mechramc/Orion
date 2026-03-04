@@ -46,7 +46,7 @@ Orion bypasses CoreML entirely. It talks to the ANE through private frameworks (
 - **Custom kernel pipelines** — compiler-generated MIL from graph IR with optimization passes
 - **Budget-aware compilation** — track and manage the ~119 compile limit per process
 
-This is the first open-source project to demonstrate **LLM training on Apple's Neural Engine**.
+Orion builds on prior work (ANEgpt, maderix/ANE) and extends it into a **production-quality LLM training and inference runtime** with a compiler, program caching, checkpointing, and benchmark harness.
 
 ---
 
