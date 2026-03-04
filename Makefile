@@ -2,14 +2,14 @@
 # Build the Orion CLI, test suite, and benchmarks.
 
 CC       = xcrun clang
-CFLAGS   = -O2 -fobjc-arc -DACCELERATE_NEW_LAPACK -Wall -Wextra -I . -I core
+CFLAGS   = -O2 -fobjc-arc -DACCELERATE_NEW_LAPACK -Wall -Wextra -I . -I core -I compiler
 FRAMEWORKS = -framework Foundation -framework IOSurface -framework Accelerate
 LDFLAGS  = -ldl $(FRAMEWORKS)
 
 BUILDDIR = build
 
 # ---------------------------------------------------------------------------
-# Source files (30 total)
+# Source files (42 total: 30 original + 12 compiler)
 # ---------------------------------------------------------------------------
 
 CORE_SRC = \
@@ -52,18 +52,47 @@ CLI_SRC = \
 	apps/cli/commands/train.m \
 	apps/cli/commands/bench.m
 
+# Stage 2: Compiler sources (pure C + ObjC for codegen/adapter)
+COMPILER_C_SRC = \
+	compiler/graph.c \
+	compiler/builder.c \
+	compiler/topo.c \
+	compiler/patterns.c \
+	compiler/validate.c \
+	compiler/pass_dce.c \
+	compiler/pass_identity.c \
+	compiler/pass_conv_bias.c \
+	compiler/pass_cast.c \
+	compiler/pass_sram.c \
+	compiler/pass_uniform_outputs.c \
+	compiler/pass_ane_validate.c \
+	compiler/pipeline.c \
+	compiler/frontends/gpt2_prefill.c \
+	compiler/frontends/gpt2_decode.c \
+	compiler/frontends/stories_train.c
+
+COMPILER_M_SRC = \
+	compiler/codegen.m \
+	compiler/kernel_adapter.m \
+	compiler/mil_diff.m
+
 MAIN_SRC = apps/cli/main.m
 
 # All library sources (everything except main.m)
 LIB_SRC = $(CORE_SRC) $(INFERENCE_SRC) $(TRAINING_SRC) $(MODEL_SRC) $(TOKENIZER_SRC) $(CLI_SRC)
 
-# Object files
+# Object files for library
 LIB_OBJ  = $(patsubst %.m,$(BUILDDIR)/%.o,$(LIB_SRC))
 MAIN_OBJ = $(patsubst %.m,$(BUILDDIR)/%.o,$(MAIN_SRC))
 ALL_OBJ  = $(LIB_OBJ) $(MAIN_OBJ)
 
+# Compiler object files (C and ObjC)
+COMPILER_C_OBJ = $(patsubst %.c,$(BUILDDIR)/%.o,$(COMPILER_C_SRC))
+COMPILER_M_OBJ = $(patsubst %.m,$(BUILDDIR)/%.o,$(COMPILER_M_SRC))
+COMPILER_OBJ = $(COMPILER_C_OBJ) $(COMPILER_M_OBJ)
+
 # ---------------------------------------------------------------------------
-# Test binaries (17 total — excludes test_program_swap which is a stub)
+# Test binaries (21 total: 17 original + 4 compiler tests)
 # ---------------------------------------------------------------------------
 
 TEST_NAMES = \
@@ -85,13 +114,21 @@ TEST_NAMES = \
 	test_infer_golden_ane \
 	test_bench_decode
 
+# Compiler tests (link with compiler objects, not full library)
+COMPILER_TEST_NAMES = \
+	test_graph_ir \
+	test_passes \
+	test_ane_passes \
+	test_compiler_equiv
+
 TEST_BINS = $(patsubst %,$(BUILDDIR)/tests/%,$(TEST_NAMES))
+COMPILER_TEST_BINS = $(patsubst %,$(BUILDDIR)/tests/%,$(COMPILER_TEST_NAMES))
 
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
 
-.PHONY: all clean test bench
+.PHONY: all clean test test-compiler bench
 
 all: orion
 
@@ -104,10 +141,34 @@ $(BUILDDIR)/%.o: %.m
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# Build and run all 17 test binaries
-test: $(TEST_BINS)
+# Compile .c → .o (for pure C compiler sources)
+$(BUILDDIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) -O2 -Wall -Wextra -I . -I core -I compiler -c -o $@ $<
+
+# Build and run all test binaries (original 17 + 4 compiler tests)
+test: $(TEST_BINS) $(COMPILER_TEST_BINS)
 	@passed=0; failed=0; total=0; \
-	for t in $(TEST_BINS); do \
+	for t in $(TEST_BINS) $(COMPILER_TEST_BINS); do \
+		total=$$((total + 1)); \
+		name=$$(basename $$t); \
+		printf "%-30s " "$$name"; \
+		if $$t > /dev/null 2>&1; then \
+			printf "PASS\n"; \
+			passed=$$((passed + 1)); \
+		else \
+			printf "FAIL\n"; \
+			failed=$$((failed + 1)); \
+		fi; \
+	done; \
+	echo ""; \
+	echo "$$passed/$$total passed, $$failed failed"; \
+	if [ $$failed -gt 0 ]; then exit 1; fi
+
+# Run only compiler tests
+test-compiler: $(COMPILER_TEST_BINS)
+	@passed=0; failed=0; total=0; \
+	for t in $(COMPILER_TEST_BINS); do \
 		total=$$((total + 1)); \
 		name=$$(basename $$t); \
 		printf "%-30s " "$$name"; \
@@ -127,6 +188,23 @@ test: $(TEST_BINS)
 $(BUILDDIR)/tests/%: tests/%.m $(LIB_OBJ)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIB_OBJ)
+
+# Build compiler test binaries: link with compiler objects only (+ Foundation)
+$(BUILDDIR)/tests/test_graph_ir: tests/test_graph_ir.m $(COMPILER_OBJ)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -framework Foundation -o $@ $< $(COMPILER_OBJ)
+
+$(BUILDDIR)/tests/test_passes: tests/test_passes.m $(COMPILER_OBJ)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -framework Foundation -o $@ $< $(COMPILER_OBJ)
+
+$(BUILDDIR)/tests/test_ane_passes: tests/test_ane_passes.m $(COMPILER_OBJ)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -framework Foundation -o $@ $< $(COMPILER_OBJ)
+
+$(BUILDDIR)/tests/test_compiler_equiv: tests/test_compiler_equiv.m $(COMPILER_OBJ)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -framework Foundation -o $@ $< $(COMPILER_OBJ)
 
 # Run benchmarks
 bench: orion

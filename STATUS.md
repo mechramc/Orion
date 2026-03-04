@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**Phase 11 — Build & Quality (COMPLETE)** — All 8 tasks across Phase 10 + 11 done (T109-T116). Model registry, OrionKernel/OrionRuntime abstractions, inference + training refactored to use kernel interface, Makefile with `make`/`make test`/`make bench`/`make clean`, zero warnings with `-Wall -Wextra`, ANE constraints documented.
+**Phase 12 — Stage 2: Orion Compiler (COMPLETE)** — All 24 tasks (T117-T140) across 4 sub-phases done. Graph IR with ~27 ops, fluent builder API, MIL codegen, 5 optimization passes (DCE, identity, cast, conv+bias, pipeline), 3 ANE-specific passes (SRAM, uniform outputs, ANE validate), 10 compiler frontends (4 GPT-2 + 6 Stories training), kernel adapter, MIL diff tool. 32/32 compiler tests pass.
 
 ## Milestone Progress
 
@@ -169,6 +169,48 @@
 | -Wall -Wextra clean build | T115 | S | **DONE** |
 | ANE constraints doc | T116 | S | **DONE** |
 
+### Phase 12 — Stage 2: Orion Compiler (v3)
+
+#### Phase A: Graph IR + MIL Emitter
+| Task | ID | Size | Status |
+|------|----|------|--------|
+| OrionGraph data structures | T117 | L | **DONE** |
+| Graph builder API | T118 | L | **DONE** |
+| Composite patterns | T119 | M | **DONE** |
+| MIL codegen | T120 | L | **DONE** |
+| Graph validation | T121 | M | **DONE** |
+| Graph IR tests | T122 | M | **DONE** |
+
+#### Phase B: Optimization Passes
+| Task | ID | Size | Status |
+|------|----|------|--------|
+| Topological sort | T123 | M | **DONE** |
+| Dead code elimination | T124 | M | **DONE** |
+| Identity elimination | T125 | M | **DONE** |
+| Conv+bias fusion | T126 | M | **DONE** |
+| Cast hoisting/elimination | T127 | M | **DONE** |
+| Pass pipeline | T128 | M | **DONE** |
+| Optimization pass tests | T129 | M | **DONE** |
+
+#### Phase C: ANE-Specific Passes
+| Task | ID | Size | Status |
+|------|----|------|--------|
+| SRAM budget estimation | T130 | M | **DONE** |
+| Output buffer uniformity | T131 | M | **DONE** |
+| ANE constraint validation | T132 | M | **DONE** |
+| ANE pass tests | T133 | M | **DONE** |
+
+#### Phase D: Integration + Profiling
+| Task | ID | Size | Status |
+|------|----|------|--------|
+| GPT-2 prefill frontend | T134 | L | **DONE** |
+| GPT-2 decode frontend | T135 | L | **DONE** |
+| Stories110M training frontends | T136 | XL | **DONE** |
+| OrionKernel adapter | T137 | M | **DONE** |
+| MIL diff tool | T138 | M | **DONE** |
+| Equivalence tests | T139 | L | **DONE** |
+| Makefile + benchmark | T140 | M | **DONE** |
+
 ## Task Progress
 - **M0**: 11/11 complete (ALL DONE)
 - **M1**: 35/35 complete (ALL DONE)
@@ -181,7 +223,8 @@
 - **Phase 9 (Benchmarks)**: 4/4 complete (ALL DONE)
 - **Phase 10 (Abstractions)**: 5/5 complete (ALL DONE)
 - **Phase 11 (Build Quality)**: 3/3 complete (ALL DONE)
-- **Grand Total**: 108/116 complete (0 in progress). 1 cut (T090). 4 deferred (T091-T093, T095).
+- **Phase 12 (Compiler)**: 24/24 complete (ALL DONE)
+- **Grand Total**: 132/140 complete (0 in progress). 1 cut (T090). 4 deferred (T091-T093, T095).
 - **Remaining**: M6 stretch (T096-T098) + M5 deferred (T091-T093, T095)
 
 ## Decisions Log
@@ -199,11 +242,16 @@
 | 2026-03-03 | v3 spec: Expanded benchmark harness | bench kernels, inference, training, swap; SRAM spill detection |
 | 2026-03-03 | v3 spec: Project evolution roadmap | Stage 1 (Core) → Stage 2 (Compiler/auto-tune) → Stage 3 (Platform) |
 | 2026-03-03 | Program cache: store/lookup (not compile-on-miss) | Cache can't know how to compile each kernel type; callers compile on miss and store |
+| 2026-03-04 | Single-level graph IR (like XLA HLO) | One op level maps to MIL ops; avoids MLIR-style complexity for 1-person project |
+| 2026-03-04 | Pure C for graph IR, ObjC only for codegen | No ObjC runtime overhead in hot path; codegen needs NSString for MIL output |
+| 2026-03-04 | Opt-in compiler (alongside existing milgen) | Compiler lives alongside hand-written milgen; doesn't replace until equivalence proven |
+| 2026-03-04 | Pass pipeline with fixpoint iteration | Runs identity→cast→conv_bias→DCE in loop until no changes; max 20 iterations |
+| 2026-03-04 | DCE uses is_live flag (no index compaction) | Avoids rewriting all input references; dead nodes marked !is_live, skipped by codegen |
 | 2026-03-03 | Decode uses seq=16 (not seq=1) as minimum ANE bucket | ANE requires ~49KB minimum IOSurface allocation; seq=1 tensors fail at eval even though they compile |
 | 2026-03-03 | ANE multi-output surfaces ordered alphabetically by MIL name | Output surfaces must be provided in alphabetical order of their MIL variable names, not return tuple order |
 
 ## Blockers
-- **None** — Phases 0-9 complete. Phase 10-11 unblocked.
+- **None** — Phases 0-12 complete. Stage 1 + Stage 2 done.
 
 ## Risks
 | Risk | Impact | Status |

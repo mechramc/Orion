@@ -8,18 +8,81 @@
 
 ## Last Updated By
 - **Tool**: Claude Code
-- **Date**: 2026-03-03
-- **Session**: 11 (Phase 10+11 — Runtime Abstractions + Build Quality)
+- **Date**: 2026-03-04
+- **Session**: 12 (Phase 12 — Stage 2: Orion Compiler)
 
 ## Current State
-- **Phase**: Phase 10+11 complete (108/116 tasks). Stage 1 (Orion Core) DONE.
-- **Last completed**: T109-T116 (Phase 10 Runtime Abstractions + Phase 11 Build Quality — all 8 done)
-- **Next tasks**: M6 LoRA stretch (T096-T098) or M5 demo app (T091-T093, T095) or Stage 2 (Compiler)
+- **Phase**: Phase 12 complete (132/140 tasks). Stage 1 (Core) + Stage 2 (Compiler) DONE.
+- **Last completed**: T117-T140 (Stage 2 Compiler — all 24 tasks done across 4 sub-phases)
+- **Next tasks**: M6 LoRA stretch (T096-T098) or M5 demo app (T091-T093, T095) or Stage 3 (Platform)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Spec version**: ORION_v3_ANE_LLM_SPEC.md (replaces v2)
 - **Known issues**: HuggingFace auth needed for TinyStories data download; ANE rejects `concat` MIL op — use multi-output instead; ANE multi-output requires uniform output buffer sizes; ANE multi-output surfaces ordered alphabetically by MIL variable name
-- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 16/16, test_train_smoke 7/7, test_program_cache 42/42, test_decode_ane 7/7, test_decode_ane_step 3/3, test_infer_golden_ane 4/4
+- **Tests passing**: test_ane_runtime 11/11, test_mil_builder 12/12, test_weight_convert 8/8, test_cpu_forward 6/6, test_tokenizer 20/20, test_decode 4/4, test_infer_golden 3/3, test_ane_prefill 34/34, test_cpu_training_ops 19/19, test_sp_tokenizer 7/7, test_data_loader 7/7, test_train_kernels 16/16, test_train_smoke 7/7, test_program_cache 42/42, test_decode_ane 7/7, test_decode_ane_step 3/3, test_infer_golden_ane 4/4, test_bench_decode (benchmark), **test_graph_ir 8/8**, **test_passes 6/6**, **test_ane_passes 8/8**, **test_compiler_equiv 10/10**
+
+## Session 12 — T117-T140 Stage 2: Orion Compiler
+
+### Overview
+Implemented full graph-level IR (OrionGraph) between model definitions and MIL text output. 24 tasks across 4 sub-phases, ~33 new files, all 32 compiler tests pass.
+
+### Phase A: Graph IR + MIL Emitter (T117-T122)
+- **T117**: `compiler/graph.{h,c}` — OrionOp enum (~27 ops), OrionNode, OrionGraph (4096 max nodes), pure C
+- **T118**: `compiler/builder.{h,c}` — Fluent builder API with composites (layernorm, gelu, silu, rmsnorm, linear)
+- **T119**: `compiler/patterns.{h,c}` — High-level patterns (attention, FFN, SwiGLU, residual, cast)
+- **T120**: `compiler/codegen.{h,m}` — MIL text generation from graph (topo-ordered walk, handles all ops)
+- **T121**: `compiler/validate.{h,c}` — Cycle detection, input validation, banned op check
+- **T122**: `tests/test_graph_ir.m` — 8 tests (create, validate, topo, codegen, composites, banned ops)
+
+### Phase B: Optimization Passes (T123-T129)
+- **T123**: `compiler/topo.{h,c}` — Kahn's algorithm. Critical fix: count ALL input refs for in-degree (add(x,x) has in_degree=2)
+- **T124**: `compiler/pass_dce.c` — Mark from outputs, walk backwards, mark !is_live
+- **T125**: `compiler/pass_identity.c` — Remove cast(same), reshape(same), identity perm, identity op
+- **T126**: `compiler/pass_conv_bias.c` — Fuse conv1x1 + add(bias) → single conv with bias
+- **T127**: `compiler/pass_cast.c` — Eliminate round-trip casts (fp16→fp32→fp16)
+- **T128**: `compiler/pipeline.{h,c}` — Fixed-order pipeline with fixpoint (identity→cast→conv_bias→DCE, max 20 iters)
+- **T129**: `tests/test_passes.m` — 6 tests (DCE, identity, cast roundtrip, pipeline, no infinite loop)
+
+### Phase C: ANE-Specific Passes (T130-T133)
+- **T130**: `compiler/pass_sram.{h,c}` — SRAM budget estimation (32MB threshold, warning-only)
+- **T131**: `compiler/pass_uniform_outputs.{h,c}` — Multi-output buffer uniformity check
+- **T132**: `compiler/pass_ane_validate.{h,c}` — ANE constraint validation (banned ops, min tensor size, weight dict, output ordering)
+- **T133**: `tests/test_ane_passes.m` — 8 tests (SRAM, tensor bytes, uniform outputs, ANE validate)
+
+### Phase D: Integration + Profiling (T134-T140)
+- **T134**: `compiler/frontends/gpt2_prefill.{h,c}` — GPT-2 prefill attention + FFN via graph builder
+- **T135**: `compiler/frontends/gpt2_decode.{h,c}` — GPT-2 decode proj + FFN (ORION_GRAPH_DECODE_SEQ=16)
+- **T136**: `compiler/frontends/stories_train.{h,c}` — All 6 training frontends (fwd_attn, fwd_ffn, ffn_bwd, sdpa_bwd1, sdpa_bwd2, qkv_bwd)
+- **T137**: `compiler/kernel_adapter.{h,m}` — Bridge between compiler frontends and OrionKernel interface
+- **T138**: `compiler/mil_diff.{h,m}` — MIL text comparison (line-by-line + structural equivalence)
+- **T139**: `tests/test_compiler_equiv.m` — 10 tests (all 10 kernel frontends generate valid, structurally correct MIL)
+- **T140**: Makefile updated with 16 C + 3 ObjC compiler sources, 4 compiler test targets, `test-compiler` target
+
+### Key Technical Decisions
+- Pure C graph IR (no ObjC runtime overhead), ObjC only for codegen (NSString MIL output)
+- Single-level IR: ops map 1:1 to MIL ops (like XLA HLO, not MLIR)
+- DCE uses is_live flag (no index compaction needed — dead nodes skipped)
+- concat_BANNED kept in enum for validation (no builder API creates it)
+- `compiler/model_config.h` — pure C forward declaration of OrionModelConfig (avoids ObjC in C frontends)
+- Opt-in integration: compiler alongside existing milgen, doesn't replace until full numerical equivalence proven
+
+### Files Created (33 new)
+- `compiler/`: graph.{h,c}, builder.{h,c}, patterns.{h,c}, codegen.{h,m}, validate.{h,c}, topo.{h,c}, model_config.h
+- `compiler/`: pipeline.{h,c}, pass_dce.{h,c}, pass_identity.{h,c}, pass_conv_bias.{h,c}, pass_cast.{h,c}
+- `compiler/`: pass_sram.{h,c}, pass_uniform_outputs.{h,c}, pass_ane_validate.{h,c}
+- `compiler/frontends/`: gpt2_prefill.{h,c}, gpt2_decode.{h,c}, stories_train.{h,c}
+- `compiler/`: kernel_adapter.{h,m}, mil_diff.{h,m}
+- `tests/`: test_graph_ir.m, test_passes.m, test_ane_passes.m, test_compiler_equiv.m
+
+### Files Modified
+- `Makefile` — Added COMPILER_C_SRC (16 files), COMPILER_M_SRC (3 files), 4 compiler test targets, `test-compiler` target, .c→.o rule
+
+### Bugs Fixed During Implementation
+- Topo sort false cycle detection: `add(x,x)` has in_degree=2, original code only decremented once per match
+- Frontend .c files couldn't include ane_runtime.h (ObjC) — created pure C model_config.h
+- Various unused variable warnings fixed across builder.c, codegen.m, pass_cast.c, pass_ane_validate.c
+
+---
 
 ## Session 10 — T105-T108 Benchmark Harness
 
@@ -558,17 +621,20 @@
 
 ## What To Pick Up Next
 
-### Stage 1 COMPLETE — All Core Tasks Done (108/116)
-Phases 0-11 all complete. Orion Core is feature-complete with runtime abstractions, Makefile build, and clean warnings.
+### Stage 1 + Stage 2 COMPLETE — 132/140 Tasks Done
+Phases 0-12 all complete. Orion Core (runtime, inference, training) + Orion Compiler (graph IR, optimization passes, frontends) done.
 
-### Option A — Stage 2: Orion Compiler
-Automatic MIL graph optimization for ANE: kernel fusion, operator scheduling, SRAM tiling, auto-bucketing. This is the next major milestone in the roadmap.
+### Option A — Stage 3: Orion Platform
+Multi-model support, dynamic compilation, auto-tuning, production deployment.
 
 ### Option B — M6 LoRA Stretch (T096-T098)
 Adapter-as-input hot swap. MIL LoRA-fused linear, adapter loading, hot-swap demo.
 
 ### Option C — M5 Demo App (T091-T093, T095)
 SwiftUI app, ModelRunner bridge, metrics overlay, wiring audit.
+
+### Option D — Replace milgen with compiler
+Now that compiler frontends produce structurally equivalent MIL, the next step is numerical equivalence testing on ANE hardware, then migrating existing kernel callers to use compiler-generated MIL.
 
 ## Staged But Uncommitted Changes
 None — all changes committed.
