@@ -6,7 +6,7 @@
 // Requires GPT-2 124M weights at model/blobs/gpt2_124m/
 //
 // Build:
-//   cd /Users/murai-labs/Github/Orion && xcrun clang -O2 -fobjc-arc -DACCELERATE_NEW_LAPACK \
+//   xcrun clang -O2 -fobjc-arc -DACCELERATE_NEW_LAPACK \
 //     -framework Foundation -framework IOSurface -framework Accelerate -ldl -I . \
 //     core/{ane_runtime,iosurface_tensor,mil_builder,ane_program_cache}.m \
 //     model/weight_loader.m \

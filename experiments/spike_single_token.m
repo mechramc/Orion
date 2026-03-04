@@ -7,7 +7,7 @@
 //   3. Multi-layer conv chain (FFN proxy: conv→gelu→conv)
 //
 // Build:
-//   cd /Users/murai-labs/Github/Orion && xcrun clang -O2 -fobjc-arc \
+//   xcrun clang -O2 -fobjc-arc \
 //     -framework Foundation -framework IOSurface -ldl -I . \
 //     core/ane_runtime.m core/iosurface_tensor.m \
 //     experiments/spike_single_token.m -o experiments/spike_single_token

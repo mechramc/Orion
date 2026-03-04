@@ -4,7 +4,7 @@
 // that compile and eval on ANE with seq=ORION_GRAPH_DECODE_SEQ (16).
 //
 // Build:
-//   cd /Users/murai-labs/Github/Orion && xcrun clang -O2 -fobjc-arc -DACCELERATE_NEW_LAPACK \
+//   xcrun clang -O2 -fobjc-arc -DACCELERATE_NEW_LAPACK \
 //     -framework Foundation -framework IOSurface -framework Accelerate -ldl -I . \
 //     core/{ane_runtime,iosurface_tensor,mil_builder}.m \
 //     compiler/{kernel_adapter,frontends/gpt2_decode}.m \

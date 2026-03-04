@@ -2,7 +2,7 @@
 // Tests: orion_cache_lookup, orion_cache_store, orion_cache_evict, orion_cache_clear, orion_cache_size
 //
 // Build:
-//   cd /Users/murai-labs/Github/Orion && xcrun clang -O2 -fobjc-arc \
+//   xcrun clang -O2 -fobjc-arc \
 //     -framework Foundation -framework IOSurface -ldl -I . \
 //     core/ane_runtime.m core/iosurface_tensor.m core/ane_program_cache.m \
 //     tests/test_program_cache.m -o tests/test_program_cache

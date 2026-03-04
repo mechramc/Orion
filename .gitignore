@@ -75,3 +75,12 @@ benchmarks/
 # Checkpoints
 checkpoints/
 *.ckpt
+
+# Internal project management (not for public repo)
+CLAUDE.md
+CHECKPOINT.md
+STATUS.md
+TASKS.md
+ORION_v2_ANE_LLM_SPEC.md
+ORION_v3_ANE_LLM_SPEC.md
+ORION_DESIGN_REVIEW.md
