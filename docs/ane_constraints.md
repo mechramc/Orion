@@ -1,7 +1,8 @@
 # ANE Constraints Reference
 
 > Practical reference for anyone working with Apple Neural Engine private APIs.
-> Every constraint below was discovered empirically during Orion development on M4 Max.
+>
+> Some constraints below were first documented by [maderix](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615) through hardware-level benchmarking (marked with **[maderix]**). The MIL IR and memory constraints were discovered empirically during Orion development on M4 Max.
 
 ---
 
@@ -49,17 +50,17 @@
 
 ---
 
-## 5. ~119 Compile Limit Per Process
+## 5. ~119 Compile Limit Per Process **[maderix]**
 
 **What happens:** After approximately 119 calls to `ANECCompile()`, the compiler silently fails or the process becomes unstable. The ANE compiler leaks internal state that cannot be reclaimed.
 
 **Workaround:** Track compile count with `orion_compile_count()`. When approaching the budget, checkpoint state to disk and call `exec()` to restart the process. exec() overhead is negligible (~50ms).
 
-**Discovered:** T004 (Upstream Validation). ANEgpt uses the same exec() restart strategy. Confirmed: 83% of wall time is compile, so a program cache (T084) is essential.
+**Discovered:** First documented by [maderix](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615). Confirmed in T004 (Upstream Validation). ANEgpt uses the same exec() restart strategy. 83% of wall time is compile, so a program cache (T084) is essential.
 
 ---
 
-## 6. SDPA Causal Masks Ignored by ANE
+## 6. SDPA Causal Masks Ignored by ANE **[maderix/ANEgpt]**
 
 **What happens:** If you pass a causal mask to ANE's SDPA operation, it compiles and runs but the mask has no effect. Attention scores are computed as if no mask exists, producing incorrect outputs for autoregressive generation.
 
@@ -73,13 +74,13 @@ Implemented via `orion_mil_causal_attention` using explicit matmul + mask + soft
 
 ---
 
-## 7. Weights Baked at Compile Time
+## 7. Weights Baked at Compile Time **[maderix]**
 
 **What happens:** Overwriting BLOBFILE weight files on disk and reloading does NOT change model outputs. The weights are embedded into the compiled ANE program binary at compile time. There is no way to update weights without recompiling.
 
 **Workaround:** Recompilation is mandatory for weight updates. For training: compile with new weights, cache the program, evict the old one. The program cache (T084) manages this lifecycle.
 
-**Discovered:** T001-T007 (Upstream Validation). Verified on M4 and M5 hardware.
+**Discovered:** First documented by [maderix](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine). Confirmed in T001-T007 (Upstream Validation) on M4 Max hardware.
 
 ---
 
@@ -150,16 +151,16 @@ Always pass an empty `NSDictionary` for weight-free programs.
 
 ## Quick Reference Table
 
-| # | Constraint | Severity | Symptom |
-|---|-----------|----------|---------|
-| 1 | No `concat` op | Compile fail | `ANECCompile() FAILED` |
-| 2 | Uniform output buffer sizes | Eval fail | `status=0x1d` |
-| 3 | Alphabetical output ordering | Silent wrong data | Outputs swapped |
-| 4 | Minimum ~49KB IOSurface | Eval fail | `status=0x1d` |
-| 5 | ~119 compile limit | Process instability | Silent fail / crash |
-| 6 | SDPA masks ignored | Silent wrong data | Unmasked attention |
-| 7 | Weights baked at compile | Silent stale data | Old weights used |
-| 8 | BLOBFILE offset is 64 | Silent wrong data | Garbage weights |
-| 9 | milText must be NSData* | Crash | Immediate crash |
-| 10 | No `gelu` MIL op | Compile fail | `ANECCompile() FAILED` |
-| 11 | Weight dict must be `@{}` | Crash | Immediate crash |
+| # | Constraint | Severity | Symptom | Source |
+|---|-----------|----------|---------|--------|
+| 1 | No `concat` op | Compile fail | `ANECCompile() FAILED` | Orion |
+| 2 | Uniform output buffer sizes | Eval fail | `status=0x1d` | Orion |
+| 3 | Alphabetical output ordering | Silent wrong data | Outputs swapped | Orion |
+| 4 | Minimum ~49KB IOSurface | Eval fail | `status=0x1d` | Orion |
+| 5 | ~119 compile limit | Process instability | Silent fail / crash | maderix |
+| 6 | SDPA masks ignored | Silent wrong data | Unmasked attention | maderix/ANEgpt |
+| 7 | Weights baked at compile | Silent stale data | Old weights used | maderix |
+| 8 | BLOBFILE offset is 64 | Silent wrong data | Garbage weights | Orion |
+| 9 | milText must be NSData* | Crash | Immediate crash | Orion |
+| 10 | No `gelu` MIL op | Compile fail | `ANECCompile() FAILED` | Orion |
+| 11 | Weight dict must be `@{}` | Crash | Immediate crash | Orion |

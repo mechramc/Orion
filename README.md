@@ -33,7 +33,7 @@ Everything runs offline. No data leaves your device.
 
 ## Why ANE?
 
-Apple ships a dedicated Neural Engine (NPU) in every iPhone, iPad, and Mac sold since 2020 — over **2 billion devices**. Each has a dedicated ML accelerator capable of **15+ TFLOPS**, but Apple only exposes it through CoreML, which:
+Apple ships a dedicated Neural Engine (NPU) in every iPhone, iPad, and Mac sold since 2020 — over **2 billion devices**. Each has a dedicated ML accelerator capable of **~19 TFLOPS fp16** (Apple claims 38 TOPS INT8, but [maderix showed](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615) the ANE dequantizes to fp16 before computation). Yet Apple only exposes it through CoreML, which:
 
 - adds significant compilation and dispatch overhead
 - restricts operations to Apple-approved model formats
@@ -46,7 +46,7 @@ Orion bypasses CoreML entirely. It talks to the ANE through private frameworks (
 - **Custom kernel pipelines** — compiler-generated MIL from graph IR with optimization passes
 - **Budget-aware compilation** — track and manage the ~119 compile limit per process
 
-Orion builds on prior work (ANEgpt, maderix/ANE) and extends it into a **production-quality LLM training and inference runtime** with a compiler, program caching, checkpointing, and benchmark harness.
+Orion builds on foundational work by [maderix](https://github.com/maderix/ANE) (private API reverse-engineering, hardware characterization) and [ANEgpt](https://github.com/vipuldivyanshu92/ANEgpt) (training kernel structure), extending them into a **production-quality LLM training and inference runtime** with a compiler, stable training (NaN fix), program caching, checkpointing, and benchmark harness.
 
 ---
 
@@ -226,7 +226,7 @@ orion chat
 
 ## Technical Discoveries
 
-Key findings from building on the ANE:
+Key findings from building on the ANE. Hardware-level constraints (compile limit, weight baking, conv vs matmul performance) were first documented by [maderix](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615); the MIL IR and memory constraints below were newly discovered during Orion development:
 
 - ANE multi-output surfaces are ordered **alphabetically by MIL variable name**, not by return tuple order
 - ANE requires minimum ~49KB IOSurface allocation — `seq_len=1` compiles but fails at eval with status `0x1d`
@@ -248,16 +248,17 @@ Key findings from building on the ANE:
 
 Orion builds on two open-source projects that reverse-engineered Apple's ANE:
 
-| | [maderix/ANE](https://github.com/maderix/ANE) | [ANEgpt](https://github.com/vipuldivyanshu92/ANEgpt) | **Orion** |
+| | [maderix/ANE](https://github.com/maderix/ANE) ([Part 1](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine), [Part 2](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615)) | [ANEgpt](https://github.com/vipuldivyanshu92/ANEgpt) | **Orion** |
 |---|---|---|---|
-| **What it is** | ANE private API driver | Training demo | Production LLM runtime |
+| **What it is** | ANE reverse-engineering + hardware characterization | Training demo | Production LLM runtime |
+| **Key contribution** | Private API discovery, SRAM/TFLOPS benchmarks, 38 TOPS debunk, compile limit, dispatch overhead | Forward+backward on ANE | Compiler, stable training, 11 new constraints, complete system |
 | **Language** | C/ObjC | C + Python | Pure ObjC (no Python at runtime) |
-| **Inference** | N/A | ANE prefill only | ANE full forward (prefill + decode) |
-| **Training** | N/A | Stories110M only | Stories110M + CLI + checkpoint + resume |
+| **Inference** | Benchmarks only | ANE prefill only | ANE full forward (prefill + decode) |
+| **Training** | N/A | Stories110M (NaN on resume) | Stories110M + CLI + checkpoint + stable resume |
 | **Models** | N/A | 1 | 2 (GPT-2 124M + Stories110M) |
 | **Tokenizer** | N/A | Python-side | Native BPE + SentencePiece in C |
 | **Program cache** | N/A | None | Composite key cache with eviction |
-| **Benchmarking** | N/A | N/A | 4-mode suite with regression tracking |
+| **Benchmarking** | Hardware microbenchmarks (SRAM, dispatch, peak TFLOPS) | N/A | 4-mode suite with regression tracking |
 | **MIL generation** | Hardcoded | Hardcoded | Compiler (graph IR → optimized MIL) |
 
 ---
@@ -309,9 +310,9 @@ python model/convert/hf_to_blobs_llama.py    # → model/blobs/stories110m/
 ## Acknowledgements
 
 Built on research from:
-- [maderix/ANE](https://github.com/maderix/ANE) — ANE private API reverse-engineering (MIT)
+- [maderix/ANE](https://github.com/maderix/ANE) — foundational ANE reverse-engineering: private API discovery, hardware characterization (SRAM cliff, dispatch overhead, 38 TOPS debunk, compile limit), and benchmarking tools. See [Part 1](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine) and [Part 2](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615) blog posts. (MIT)
 - [ANEgpt](https://github.com/vipuldivyanshu92/ANEgpt) — LLM training harness on ANE (MIT)
-- [hollance/neural-engine](https://github.com/hollance/neural-engine) — ANE community documentation
+- [hollance/neural-engine](https://github.com/hollance/neural-engine) — ANE community documentation (tensor layout insights)
 
 ## License
 

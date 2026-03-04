@@ -110,19 +110,27 @@ Three bugs caused NaN/Inf cascades during training. All fixed and verified.
 
 ## Hardware: Apple Neural Engine (M4 Max)
 
-| Property | Value |
-|----------|-------|
-| Generation | H16 |
-| Peak throughput | 15+ TFLOPS (fp16) |
-| Data format | fp16 `[1, C, 1, S]` on IOSurface |
-| Compile limit | ~119 programs per process |
-| SRAM | Limited; large models spill to DRAM |
+Hardware characteristics based on measurements by [maderix](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615), confirmed independently in Orion benchmarks.
+
+| Property | Value | Source |
+|----------|-------|--------|
+| Generation | H16 | Apple spec |
+| Peak throughput (Apple spec) | 38 TOPS (INT8) | Apple spec |
+| Peak throughput (actual fp16) | ~19 TFLOPS | [maderix Part 2](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615) |
+| On-chip SRAM | 32 MB (30% perf drop when exceeded) | [maderix Part 2](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615) |
+| Dispatch overhead (XPC+IOKit) | ~0.095 ms | [maderix Part 2](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615) |
+| Data format | fp16 `[1, C, 1, S]` on IOSurface | maderix/hollance |
+| Compile limit | ~119 programs per process | [maderix Part 2](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615) |
+
+> Note: Apple claims 38 TOPS (INT8), but the ANE dequantizes INT8 to fp16 before computation — INT8 saves memory bandwidth, not compute. Actual measured peak is ~19 TFLOPS fp16.
 
 ### Key Constraints
 
-- **Compile budget**: ~119 compilations per process before the ANE stops accepting programs. Managed via program cache and `exec()` restart.
+Hardware-level constraints (compile limit, weight baking, conv vs matmul) were first documented by [maderix](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615). MIL IR and memory constraints were discovered during Orion development.
+
+- **Compile budget**: ~119 compilations per process before the ANE stops accepting programs. Managed via program cache and `exec()` restart. *(maderix)*
 - **Tensor layout**: All I/O must be fp16 `[1, C, 1, S]` on IOSurface-backed memory. CPU↔ANE transfers require transpose.
-- **Minimum allocation**: ~49KB IOSurface minimum. `seq_len=1` compiles but fails at eval (status `0x1d`). Minimum decode bucket is `seq=16`.
-- **No concat**: ANE rejects the `concat` MIL op. Use multi-output programs with uniform buffer sizes instead.
-- **No causal masks in SDPA**: ANE ignores causal masks — attention must be manually decomposed (Q@K^T → mask → softmax → @V).
-- **Alphabetical output ordering**: Multi-output surfaces are ordered by MIL variable name, not return tuple order.
+- **Minimum allocation**: ~49KB IOSurface minimum. `seq_len=1` compiles but fails at eval (status `0x1d`). Minimum decode bucket is `seq=16`. *(Orion)*
+- **No concat**: ANE rejects the `concat` MIL op. Use multi-output programs with uniform buffer sizes instead. *(Orion)*
+- **No causal masks in SDPA**: ANE ignores causal masks — attention must be manually decomposed (Q@K^T → mask → softmax → @V). *(maderix/ANEgpt, confirmed by Orion)*
+- **Alphabetical output ordering**: Multi-output surfaces are ordered by MIL variable name, not return tuple order. *(Orion)*
