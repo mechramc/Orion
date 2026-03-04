@@ -1,5 +1,6 @@
 #import "stories_train.h"
 #import "stories_train_kernels.milgen.h"
+#import "../../core/kernel.h"
 #import <math.h>
 #import <stdlib.h>
 #import <string.h>
@@ -193,68 +194,135 @@ static int load_blob_f32(const char* path, float* out, int max_elements) {
     return n_elements;
 }
 
-#pragma mark - Compile Layer Kernels
+#pragma mark - OrionKernel Adapters for Training
 
-static bool compile_layer(OrionLayerKernels* kern, int layer_idx,
-                           const OrionModelConfig* cfg, NSString* weight_dir) {
-    int d = cfg->d_model, h = cfg->hidden_dim, s = cfg->max_seq;
+// MIL gen adapters — training kernels ignore bucket
+static NSString* milgen_fwd_attn_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+    (void)bucket;
+    return orion_milgen_fwd_attn(layer_idx, cfg);
+}
+
+static NSString* milgen_fwd_ffn_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+    (void)bucket;
+    return orion_milgen_fwd_ffn(layer_idx, cfg);
+}
+
+static NSString* milgen_ffn_bwd_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+    (void)bucket;
+    return orion_milgen_ffn_bwd(layer_idx, cfg);
+}
+
+static NSString* milgen_sdpa_bwd1_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+    (void)bucket;
+    return orion_milgen_sdpa_bwd1(layer_idx, cfg);
+}
+
+static NSString* milgen_sdpa_bwd2_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+    (void)bucket;
+    return orion_milgen_sdpa_bwd2(layer_idx, cfg);
+}
+
+static NSString* milgen_qkv_bwd_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+    (void)bucket;
+    return orion_milgen_qkv_bwd(layer_idx, cfg);
+}
+
+// Weight dict adapters
+static NSDictionary* wdict_fwd_attn_adapter(int layer_idx, int bucket, const char* blob_dir) {
+    (void)bucket;
+    NSString *base = @(blob_dir);
     NSString *L = [NSString stringWithFormat:@"layer%d", layer_idx];
-
-    // fwdAttn
-    NSString *mil = orion_milgen_fwd_attn(layer_idx, cfg);
-    NSDictionary *wdict = load_weight_dict(weight_dir, @[
+    return load_weight_dict(base, @[
         [L stringByAppendingPathComponent:@"rms1.bin"],
         [L stringByAppendingPathComponent:@"wq.bin"],
         [L stringByAppendingPathComponent:@"wk.bin"],
         [L stringByAppendingPathComponent:@"wv.bin"],
         [L stringByAppendingPathComponent:@"wo.bin"],
-        [NSString stringWithFormat:@"masks/causal_%d.bin", s]
+        [NSString stringWithFormat:@"masks/causal_%d.bin", kStories110M.max_seq]
     ]);
-    kern->fwd_attn = orion_compile_mil(mil.UTF8String, wdict, "fwdAttn");
-    if (!kern->fwd_attn) return false;
+}
 
-    // fwdFFN
-    mil = orion_milgen_fwd_ffn(layer_idx, cfg);
-    wdict = load_weight_dict(weight_dir, @[
+static NSDictionary* wdict_fwd_ffn_adapter(int layer_idx, int bucket, const char* blob_dir) {
+    (void)bucket;
+    NSString *base = @(blob_dir);
+    NSString *L = [NSString stringWithFormat:@"layer%d", layer_idx];
+    return load_weight_dict(base, @[
         [L stringByAppendingPathComponent:@"rms2.bin"],
         [L stringByAppendingPathComponent:@"w1.bin"],
         [L stringByAppendingPathComponent:@"w3.bin"],
         [L stringByAppendingPathComponent:@"w2.bin"]
     ]);
-    kern->fwd_ffn = orion_compile_mil(mil.UTF8String, wdict, "fwdFFN");
-    if (!kern->fwd_ffn) return false;
+}
 
-    // ffnBwd (transposed weights)
-    mil = orion_milgen_ffn_bwd(layer_idx, cfg);
-    wdict = load_weight_dict(weight_dir, @[
+static NSDictionary* wdict_ffn_bwd_adapter(int layer_idx, int bucket, const char* blob_dir) {
+    (void)bucket;
+    NSString *base = @(blob_dir);
+    NSString *L = [NSString stringWithFormat:@"layer%d", layer_idx];
+    return load_weight_dict(base, @[
         [L stringByAppendingPathComponent:@"w2t.bin"],
         [L stringByAppendingPathComponent:@"w1t.bin"],
         [L stringByAppendingPathComponent:@"w3t.bin"]
     ]);
-    kern->ffn_bwd = orion_compile_mil(mil.UTF8String, wdict, "ffnBwd");
-    if (!kern->ffn_bwd) return false;
+}
 
-    // sdpaBwd1
-    mil = orion_milgen_sdpa_bwd1(layer_idx, cfg);
-    wdict = load_weight_dict(weight_dir, @[
+static NSDictionary* wdict_sdpa_bwd1_adapter(int layer_idx, int bucket, const char* blob_dir) {
+    (void)bucket;
+    NSString *base = @(blob_dir);
+    NSString *L = [NSString stringWithFormat:@"layer%d", layer_idx];
+    return load_weight_dict(base, @[
         [L stringByAppendingPathComponent:@"wot.bin"],
-        [NSString stringWithFormat:@"masks/causal_%d.bin", s]
+        [NSString stringWithFormat:@"masks/causal_%d.bin", kStories110M.max_seq]
     ]);
-    kern->sdpa_bwd1 = orion_compile_mil(mil.UTF8String, wdict, "sdpaBwd1");
-    if (!kern->sdpa_bwd1) return false;
+}
 
-    // sdpaBwd2 (weight-free)
-    mil = orion_milgen_sdpa_bwd2(layer_idx, cfg);
-    kern->sdpa_bwd2 = orion_compile_mil(mil.UTF8String, @{}, "sdpaBwd2");
-    if (!kern->sdpa_bwd2) return false;
-
-    // qkvBwd
-    mil = orion_milgen_qkv_bwd(layer_idx, cfg);
-    wdict = load_weight_dict(weight_dir, @[
+static NSDictionary* wdict_qkv_bwd_adapter(int layer_idx, int bucket, const char* blob_dir) {
+    (void)bucket;
+    NSString *base = @(blob_dir);
+    NSString *L = [NSString stringWithFormat:@"layer%d", layer_idx];
+    return load_weight_dict(base, @[
         [L stringByAppendingPathComponent:@"wqt.bin"],
         [L stringByAppendingPathComponent:@"wkt.bin"],
         [L stringByAppendingPathComponent:@"wvt.bin"]
     ]);
+}
+
+#pragma mark - Compile Layer Kernels
+
+static bool compile_layer(OrionLayerKernels* kern, int layer_idx,
+                           const OrionModelConfig* cfg, NSString* weight_dir) {
+    // Training compiles directly — no cache (weights change every recompile)
+    int s = cfg->max_seq;
+    NSString *base = weight_dir;
+
+    NSString *mil;
+    NSDictionary *wdict;
+
+    mil = milgen_fwd_attn_adapter(layer_idx, s, cfg);
+    wdict = wdict_fwd_attn_adapter(layer_idx, s, base.UTF8String);
+    kern->fwd_attn = orion_compile_mil(mil.UTF8String, wdict, "fwdAttn");
+    if (!kern->fwd_attn) return false;
+
+    mil = milgen_fwd_ffn_adapter(layer_idx, s, cfg);
+    wdict = wdict_fwd_ffn_adapter(layer_idx, s, base.UTF8String);
+    kern->fwd_ffn = orion_compile_mil(mil.UTF8String, wdict, "fwdFFN");
+    if (!kern->fwd_ffn) return false;
+
+    mil = milgen_ffn_bwd_adapter(layer_idx, s, cfg);
+    wdict = wdict_ffn_bwd_adapter(layer_idx, s, base.UTF8String);
+    kern->ffn_bwd = orion_compile_mil(mil.UTF8String, wdict, "ffnBwd");
+    if (!kern->ffn_bwd) return false;
+
+    mil = milgen_sdpa_bwd1_adapter(layer_idx, s, cfg);
+    wdict = wdict_sdpa_bwd1_adapter(layer_idx, s, base.UTF8String);
+    kern->sdpa_bwd1 = orion_compile_mil(mil.UTF8String, wdict, "sdpaBwd1");
+    if (!kern->sdpa_bwd1) return false;
+
+    mil = milgen_sdpa_bwd2_adapter(layer_idx, s, cfg);
+    kern->sdpa_bwd2 = orion_compile_mil(mil.UTF8String, @{}, "sdpaBwd2");
+    if (!kern->sdpa_bwd2) return false;
+
+    mil = milgen_qkv_bwd_adapter(layer_idx, s, cfg);
+    wdict = wdict_qkv_bwd_adapter(layer_idx, s, base.UTF8String);
     kern->qkv_bwd = orion_compile_mil(mil.UTF8String, wdict, "qkvBwd");
     if (!kern->qkv_bwd) return false;
 

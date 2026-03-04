@@ -203,7 +203,6 @@ static void ffn(const OrionGPT2LayerWeights* l,
 void orion_gpt2_forward_cpu(const OrionGPT2Weights* w,
                              const int* tokens, int seq_len,
                              float* logits) {
-    int d = w->d_model;
     int vocab = w->vocab;
 
     // Allocate full logits and call the _all version, then copy last row
@@ -345,7 +344,7 @@ void orion_gpt2_prefill_kv(const OrionGPT2Weights* w,
 /// Single-head attention for decode: Q[1, head_dim] against cached K,V
 static void attention_decode_head(const float* q_h, const float* k_cache_h,
                                     const float* v_cache_h, int cache_len,
-                                    int head_dim, int max_seq, float* out_h) {
+                                    int head_dim, int max_seq __attribute__((unused)), float* out_h) {
     float scale = 1.0f / sqrtf((float)head_dim);
 
     // scores[cache_len] = Q_h @ K_h^T * scale

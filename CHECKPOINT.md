@@ -9,12 +9,12 @@
 ## Last Updated By
 - **Tool**: Claude Code
 - **Date**: 2026-03-03
-- **Session**: 10 (Phase 9 — Benchmark Harness)
+- **Session**: 11 (Phase 10+11 — Runtime Abstractions + Build Quality)
 
 ## Current State
-- **Phase**: Phase 9 complete (99/116 tasks). Next: T109-T113 (Runtime Abstractions)
-- **Last completed**: T105-T108 (Benchmark Harness — all done)
-- **Next tasks**: T109 (OrionModel registry) → T110 (OrionKernel) → T111 (OrionRuntime) → T112 (Model registry tests) → T113 (Runtime tests)
+- **Phase**: Phase 10+11 complete (108/116 tasks). Stage 1 (Orion Core) DONE.
+- **Last completed**: T109-T116 (Phase 10 Runtime Abstractions + Phase 11 Build Quality — all 8 done)
+- **Next tasks**: M6 LoRA stretch (T096-T098) or M5 demo app (T091-T093, T095) or Stage 2 (Compiler)
 - **Branch**: `main`
 - **Repo is green**: YES (all tests pass)
 - **Spec version**: ORION_v3_ANE_LLM_SPEC.md (replaces v2)
@@ -558,24 +558,17 @@
 
 ## What To Pick Up Next
 
-### Priority 1 — M4 Weight Swapping (T084-T089)
-Program cache is the highest-priority unblocked work. It unblocks benchmarks (T105) and is required for production training and inference.
-1. **T084** (L): Program cache — `orion_get_or_compile` with composite key
-2. **T085** (M): Cache eviction — LRU with safe ObjC release
-3. **T086** (M): weights_id abstraction — step-based for training, named for inference
-4. **T087** (M): CLI bench swap args
-5. **T088** (XL): Swap endurance test — 100 alternations, no memory leak
-6. **T089** (S): Wire bench swap CLI
+### Stage 1 COMPLETE — All Core Tasks Done (108/116)
+Phases 0-11 all complete. Orion Core is feature-complete with runtime abstractions, Makefile build, and clean warnings.
 
-### Priority 2 — ANE Single-Token Spike (T099)
-Can run in parallel with M4. Validates whether v3 inference architecture is feasible.
-- **T099** (M): Compile GPT-2 forward for seq_len=1, measure ANE eval latency
-- If passes → proceed with T100-T104 (ANE full forward inference)
-- If fails → document constraint, keep hybrid architecture as production path
+### Option A — Stage 2: Orion Compiler
+Automatic MIL graph optimization for ANE: kernel fusion, operator scheduling, SRAM tiling, auto-bucketing. This is the next major milestone in the roadmap.
 
-### Priority 3 — Build System (T114)
-Quick win that makes everything else easier.
-- **T114** (M): Makefile with `make`, `make test`, `make bench`, `make clean`
+### Option B — M6 LoRA Stretch (T096-T098)
+Adapter-as-input hot swap. MIL LoRA-fused linear, adapter loading, hot-swap demo.
+
+### Option C — M5 Demo App (T091-T093, T095)
+SwiftUI app, ModelRunner bridge, metrics overlay, wiring audit.
 
 ## Staged But Uncommitted Changes
 None — all changes committed.
@@ -593,7 +586,7 @@ None — all changes committed.
 - `vendor/` is gitignored — upstream repos must be cloned locally (`git clone` into `vendor/`)
 - `data/` is gitignored — TinyStories data must be downloaded locally via `scripts/download_data.sh`
 - Weight files are gitignored — `model/weights/stories110M.bin` (418MB) must be downloaded locally
-- No build system yet — `xcrun clang` single-file compilation (match upstream)
+- Makefile available — `make`, `make test`, `make bench`, `make clean`
 - Weight blobs are gitignored (`model/blobs/*`) — must run converters locally
 - Private ANE APIs require macOS 15+ on Apple Silicon — cannot be tested in CI
 - SIP may need to be considered for dlopen of private frameworks

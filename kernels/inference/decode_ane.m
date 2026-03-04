@@ -3,6 +3,7 @@
 #import "gpt2_decode_ane.milgen.h"
 #import "../../core/iosurface_tensor.h"
 #import "../../core/ane_program_cache.h"
+#import "../../core/kernel.h"
 #import "../../model/configs/gpt2_124m.h"
 #import <Accelerate/Accelerate.h>
 #import <math.h>
@@ -88,6 +89,45 @@ static NSDictionary* build_decode_ffn_wdict(int layer_idx, NSString *dir) {
     return dict;
 }
 
+#pragma mark - OrionKernel Adapters
+
+// MIL gen adapters — decode kernels ignore bucket
+static NSString* milgen_decode_proj_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+    (void)bucket;
+    return orion_milgen_gpt2_decode_proj(layer_idx, cfg);
+}
+
+static NSString* milgen_decode_ffn_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+    (void)bucket;
+    return orion_milgen_gpt2_decode_ffn(layer_idx, cfg);
+}
+
+// Weight dict adapters
+static NSDictionary* wdict_decode_proj_adapter(int layer_idx, int bucket, const char* blob_dir) {
+    (void)bucket;
+    return build_decode_proj_wdict(layer_idx, @(blob_dir));
+}
+
+static NSDictionary* wdict_decode_ffn_adapter(int layer_idx, int bucket, const char* blob_dir) {
+    (void)bucket;
+    return build_decode_ffn_wdict(layer_idx, @(blob_dir));
+}
+
+// Kernel instances
+static const OrionKernel kDecodeProj = {
+    .name = "decode_proj",
+    .generate_mil = milgen_decode_proj_adapter,
+    .build_wdict = wdict_decode_proj_adapter,
+    .n_inputs = 1, .n_outputs = 3,
+};
+
+static const OrionKernel kDecodeFFN = {
+    .name = "decode_ffn",
+    .generate_mil = milgen_decode_ffn_adapter,
+    .build_wdict = wdict_decode_ffn_adapter,
+    .n_inputs = 1, .n_outputs = 1,
+};
+
 #pragma mark - T101: ANE Decode Step
 
 bool orion_ane_decode_step(const OrionGPT2Weights* w,
@@ -104,7 +144,6 @@ bool orion_ane_decode_step(const OrionGPT2Weights* w,
     int seq = ORION_DECODE_SEQ;
     int count = d * seq;
 
-    NSString *dir = @(blob_dir);
     OrionModelConfig cfg = kGPT2_124M;
     OrionWeightsBinding wb = { .weights_id = "base", .bucket = seq };
 
@@ -125,21 +164,6 @@ bool orion_ane_decode_step(const OrionGPT2Weights* w,
         const OrionGPT2LayerWeights *l = &w->layers[layer];
 
         // === ANE decode_proj: x → LN1 → Q, K, V ===
-        OrionProgram *proj_prog = orion_cache_lookup("decode_proj", layer, &wb);
-        if (!proj_prog) {
-            NSString *mil = orion_milgen_gpt2_decode_proj(layer, &cfg);
-            NSDictionary *wdict = build_decode_proj_wdict(layer, dir);
-            char tag[64];
-            snprintf(tag, sizeof(tag), "decode_proj_L%d", layer);
-            proj_prog = orion_compile_mil(mil.UTF8String, wdict, tag);
-            if (!proj_prog) {
-                fprintf(stderr, "ANE decode: proj L%d compile failed\n", layer);
-                CFRelease(ioInput); free(x);
-                return false;
-            }
-            orion_cache_store("decode_proj", layer, &wb, proj_prog);
-        }
-
         write_decode_input(ioInput, x, d, seq);
 
         IOSurfaceRef ioQ = make_f32_surface(count);
@@ -150,9 +174,10 @@ bool orion_ane_decode_step(const OrionGPT2Weights* w,
         // MIL returns (q32, k32, v32) → sorted: k32, q32, v32.
         IOSurfaceRef proj_ins[]  = {ioInput};
         IOSurfaceRef proj_outs[] = {ioK, ioQ, ioV};
-        bool ok = orion_eval(proj_prog, proj_ins, 1, proj_outs, 3);
+        bool ok = orion_kernel_eval(&kDecodeProj, layer, seq, &cfg,
+                                    blob_dir, &wb, proj_ins, 1, proj_outs, 3);
         if (!ok) {
-            fprintf(stderr, "ANE decode: proj L%d eval failed\n", layer);
+            fprintf(stderr, "ANE decode: proj L%d failed\n", layer);
             CFRelease(ioInput); CFRelease(ioQ); CFRelease(ioK); CFRelease(ioV);
             free(x);
             return false;
@@ -226,29 +251,15 @@ bool orion_ane_decode_step(const OrionGPT2Weights* w,
         free(attn_out);
 
         // === ANE decode_ffn: x → LN2 → FFN → residual → hidden ===
-        OrionProgram *ffn_prog = orion_cache_lookup("decode_ffn", layer, &wb);
-        if (!ffn_prog) {
-            NSString *mil = orion_milgen_gpt2_decode_ffn(layer, &cfg);
-            NSDictionary *wdict = build_decode_ffn_wdict(layer, dir);
-            char tag[64];
-            snprintf(tag, sizeof(tag), "decode_ffn_L%d", layer);
-            ffn_prog = orion_compile_mil(mil.UTF8String, wdict, tag);
-            if (!ffn_prog) {
-                fprintf(stderr, "ANE decode: FFN L%d compile failed\n", layer);
-                CFRelease(ioInput); free(x);
-                return false;
-            }
-            orion_cache_store("decode_ffn", layer, &wb, ffn_prog);
-        }
-
         write_decode_input(ioInput, x, d, seq);
 
         IOSurfaceRef ioFFNOut = make_f32_surface(count);
         IOSurfaceRef ffn_ins[]  = {ioInput};
         IOSurfaceRef ffn_outs[] = {ioFFNOut};
-        ok = orion_eval(ffn_prog, ffn_ins, 1, ffn_outs, 1);
+        ok = orion_kernel_eval(&kDecodeFFN, layer, seq, &cfg,
+                               blob_dir, &wb, ffn_ins, 1, ffn_outs, 1);
         if (!ok) {
-            fprintf(stderr, "ANE decode: FFN L%d eval failed\n", layer);
+            fprintf(stderr, "ANE decode: FFN L%d failed\n", layer);
             CFRelease(ioInput); CFRelease(ioFFNOut);
             free(x);
             return false;

@@ -5,7 +5,7 @@
 > This is NOT the handoff document — see `CHECKPOINT.md` for cross-session handoff.
 
 ## Current Phase
-**Phase 9 — Benchmark Harness (COMPLETE)** — All 4 tasks done (T105-T108). Per-kernel ANE latency profiling, end-to-end inference throughput, training step breakdown, and regression tracking with --save-baseline. Next: Phase 10 (Runtime Abstractions).
+**Phase 11 — Build & Quality (COMPLETE)** — All 8 tasks across Phase 10 + 11 done (T109-T116). Model registry, OrionKernel/OrionRuntime abstractions, inference + training refactored to use kernel interface, Makefile with `make`/`make test`/`make bench`/`make clean`, zero warnings with `-Wall -Wextra`, ANE constraints documented.
 
 ## Milestone Progress
 
@@ -121,12 +121,12 @@
 ### M5 — Demo App
 | Task | ID | Size | Status |
 |------|----|------|--------|
-| Build system (Makefile) | T090 | M | Pending |
-| SwiftUI content view | T091 | M | Pending |
-| ModelRunner bridge | T092 | M | Pending |
-| Metrics overlay | T093 | S | Pending |
-| README benchmarks | T094 | M | Pending |
-| Wiring audit | T095 | S | Pending |
+| Build system (Makefile) | T090 | M | **CUT** (superseded by T114) |
+| SwiftUI content view | T091 | M | Deferred |
+| ModelRunner bridge | T092 | M | Deferred |
+| Metrics overlay | T093 | S | Deferred |
+| README benchmarks | T094 | M | **DONE** (covered by README rewrite) |
+| Wiring audit | T095 | S | Deferred |
 
 ### M6 — LoRA Stretch
 | Task | ID | Size | Status |
@@ -156,18 +156,18 @@
 ### Phase 10 — Runtime Abstractions (v3)
 | Task | ID | Size | Status |
 |------|----|------|--------|
-| OrionModel registry | T109 | M | Pending |
-| OrionKernel interface | T110 | L | Pending |
-| OrionRuntime interface | T111 | L | Pending |
-| Refactor inference to abstractions | T112 | M | Pending |
-| Refactor training to abstractions | T113 | M | Pending |
+| OrionModel registry | T109 | M | **DONE** |
+| OrionKernel interface | T110 | L | **DONE** |
+| OrionRuntime interface | T111 | L | **DONE** |
+| Refactor inference to abstractions | T112 | M | **DONE** |
+| Refactor training to abstractions | T113 | M | **DONE** |
 
 ### Phase 11 — Build & Quality (v3)
 | Task | ID | Size | Status |
 |------|----|------|--------|
-| Makefile | T114 | M | Pending |
-| -Wall -Wextra clean build | T115 | S | Pending |
-| ANE constraints doc | T116 | S | Pending |
+| Makefile | T114 | M | **DONE** |
+| -Wall -Wextra clean build | T115 | S | **DONE** |
+| ANE constraints doc | T116 | S | **DONE** |
 
 ## Task Progress
 - **M0**: 11/11 complete (ALL DONE)
@@ -175,14 +175,14 @@
 - **M2**: 10/10 complete (ALL DONE)
 - **M3**: 27/27 complete (ALL DONE)
 - **M4**: 6/6 complete (ALL DONE)
-- **M5**: 0/6 complete
+- **M5**: 1/6 complete (T094 done, T090 cut/superseded by T114, T091-T093+T095 deferred — SwiftUI app)
 - **M6**: 0/3 complete (stretch)
 - **Phase 8 (ANE Full Forward)**: 6/6 complete (ALL DONE)
-- **Phase 9 (Benchmarks)**: 0/4 complete
-- **Phase 10 (Abstractions)**: 0/5 complete
-- **Phase 11 (Build Quality)**: 0/3 complete
-- **Grand Total**: 95/116 complete (0 in progress)
-- **Critical paths**: Training DONE | Weight swap DONE | ANE inference v3 DONE | Benchmarks: T105→T108
+- **Phase 9 (Benchmarks)**: 4/4 complete (ALL DONE)
+- **Phase 10 (Abstractions)**: 5/5 complete (ALL DONE)
+- **Phase 11 (Build Quality)**: 3/3 complete (ALL DONE)
+- **Grand Total**: 108/116 complete (0 in progress). 1 cut (T090). 4 deferred (T091-T093, T095).
+- **Remaining**: M6 stretch (T096-T098) + M5 deferred (T091-T093, T095)
 
 ## Decisions Log
 | Date | Decision | Rationale |
@@ -203,7 +203,7 @@
 | 2026-03-03 | ANE multi-output surfaces ordered alphabetically by MIL name | Output surfaces must be provided in alphabetical order of their MIL variable names, not return tuple order |
 
 ## Blockers
-- **None** — M4 complete, Phase 8 ready to start
+- **None** — Phases 0-9 complete. Phase 10-11 unblocked.
 
 ## Risks
 | Risk | Impact | Status |

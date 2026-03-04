@@ -9,13 +9,6 @@
 
 #pragma mark - Helpers
 
-// Generate a cast to fp32 for a single tensor
-static NSString* mil_cast_fp32(NSString* prefix, NSString* input, int dim, int seq) {
-    return [NSString stringWithFormat:
-        @"        string %@_dt = const()[name=string(\"%@_dt\"), val=string(\"fp32\")];\n"
-         "        tensor<fp32, [1,%d,1,%d]> %@ = cast(dtype=%@_dt, x=%@)[name=string(\"%@\")];\n",
-        prefix, prefix, dim, seq, prefix, prefix, input, prefix];
-}
 
 #pragma mark - T064: fwdAttn — Attention Forward with Taps
 
@@ -340,7 +333,7 @@ NSString* orion_milgen_sdpa_bwd1(int layer_idx, const OrionModelConfig* cfg) {
 
 #pragma mark - T068: sdpaBwd2 — SDPA Backward Part 2
 
-NSString* orion_milgen_sdpa_bwd2(int layer_idx, const OrionModelConfig* cfg) {
+NSString* orion_milgen_sdpa_bwd2(int layer_idx __attribute__((unused)), const OrionModelConfig* cfg) {
     int d  = cfg->d_model;   // 768
     int nh = cfg->n_head;    // 12
     int hd = cfg->head_dim;  // 64

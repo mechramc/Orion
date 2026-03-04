@@ -132,13 +132,10 @@ static void baseline_compare(NSDictionary *current) {
         double base = base_val.doubleValue;
         double cur = cur_val.doubleValue;
         double pct = (base > 0) ? ((cur - base) / base) * 100.0 : 0;
-        const char *status;
 
         if (pct > 15.0) {
-            status = "WARN (+%.1f%%)";
             warn_count++;
         } else {
-            status = "PASS";
             pass_count++;
         }
 

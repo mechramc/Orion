@@ -5,6 +5,7 @@
 #import "../../core/bucket.h"
 #import "../../core/iosurface_tensor.h"
 #import "../../core/ane_program_cache.h"
+#import "../../core/kernel.h"
 #import "../../model/configs/gpt2_124m.h"
 #import <Accelerate/Accelerate.h>
 #import <sys/time.h>
@@ -92,6 +93,51 @@ static NSDictionary* build_final_ln_wdict(NSString *dir) {
              [dir stringByAppendingPathComponent:@"ln_f_b.bin"]);
     return dict;
 }
+
+#pragma mark - OrionKernel Adapters
+
+// MIL gen adapters — prefill_attn/ffn already match OrionMILGenFn signature
+static NSString* milgen_final_ln_adapter(int layer_idx, int bucket, const OrionModelConfig* cfg) {
+    (void)layer_idx;
+    return orion_milgen_gpt2_final_ln(bucket, cfg);
+}
+
+// Weight dict adapters — convert const char* → NSString*
+static NSDictionary* wdict_attn_adapter(int layer_idx, int bucket, const char* blob_dir) {
+    return build_attn_wdict(layer_idx, bucket, @(blob_dir));
+}
+
+static NSDictionary* wdict_ffn_adapter(int layer_idx, int bucket, const char* blob_dir) {
+    (void)bucket;
+    return build_ffn_wdict(layer_idx, @(blob_dir));
+}
+
+static NSDictionary* wdict_final_ln_adapter(int layer_idx, int bucket, const char* blob_dir) {
+    (void)layer_idx; (void)bucket;
+    return build_final_ln_wdict(@(blob_dir));
+}
+
+// Kernel instances
+static const OrionKernel kPrefillAttn = {
+    .name = "prefill_attn",
+    .generate_mil = (OrionMILGenFn)orion_milgen_gpt2_prefill_attn,
+    .build_wdict = wdict_attn_adapter,
+    .n_inputs = 1, .n_outputs = 3,
+};
+
+static const OrionKernel kPrefillFFN = {
+    .name = "prefill_ffn",
+    .generate_mil = (OrionMILGenFn)orion_milgen_gpt2_prefill_ffn,
+    .build_wdict = wdict_ffn_adapter,
+    .n_inputs = 1, .n_outputs = 1,
+};
+
+static const OrionKernel kPrefillFinalLN = {
+    .name = "prefill_final_ln",
+    .generate_mil = milgen_final_ln_adapter,
+    .build_wdict = wdict_final_ln_adapter,
+    .n_inputs = 1, .n_outputs = 1,
+};
 
 #pragma mark - T051: Prompt Padding + Layout Conversion
 
@@ -186,7 +232,6 @@ bool orion_ane_prefill(const OrionGPT2Weights* w,
     fprintf(stderr, "ANE prefill: %d tokens → bucket %d\n", prompt_len, bucket);
 
     int count = d * bucket;
-    NSString *dir = @(blob_dir);
 
     // T051: Prepare input (embed + pad + transpose)
     IOSurfaceRef ioHidden = orion_prepare_ane_input(w, tokens, prompt_len, bucket, cfg);
@@ -194,41 +239,21 @@ bool orion_ane_prefill(const OrionGPT2Weights* w,
 
     // T084: Cache binding — "base" weights_id for standard inference
     OrionWeightsBinding wb = { .weights_id = "base", .bucket = bucket };
-    int cache_hits = 0, cache_misses = 0;
+    int compiles_before = orion_compile_count();
 
     // Compile and run 12 layers of (attention + FFN)
     for (int layer = 0; layer < n_layer; layer++) {
-        // --- Attention ---
-        OrionProgram *attn_prog = orion_cache_lookup("prefill_attn", layer, &wb);
-        if (attn_prog) {
-            cache_hits++;
-        } else {
-            NSString *attn_mil = orion_milgen_gpt2_prefill_attn(layer, bucket, cfg);
-            NSDictionary *attn_wdict = build_attn_wdict(layer, bucket, dir);
-            char tag[64];
-            snprintf(tag, sizeof(tag), "prefill_attn_L%d", layer);
-            attn_prog = orion_compile_mil(attn_mil.UTF8String, attn_wdict, tag);
-            if (!attn_prog) {
-                fprintf(stderr, "ANE prefill: attention L%d compile failed\n", layer);
-                CFRelease(ioHidden);
-                return false;
-            }
-            orion_cache_store("prefill_attn", layer, &wb, attn_prog);
-            cache_misses++;
-        }
-
-        // Eval attention: 1 input → 3 outputs (hidden, K, V)
+        // --- Attention: 1 input → 3 outputs (hidden, K, V) ---
         IOSurfaceRef ioAttnOut = make_f32_surface(count);
         IOSurfaceRef ioK       = make_f32_surface(count);
         IOSurfaceRef ioV       = make_f32_surface(count);
 
         IOSurfaceRef attn_ins[]  = {ioHidden};
         IOSurfaceRef attn_outs[] = {ioAttnOut, ioK, ioV};
-        bool ok = orion_eval(attn_prog, attn_ins, 1, attn_outs, 3);
-        // Do NOT release attn_prog — cache owns it
-
+        bool ok = orion_kernel_eval(&kPrefillAttn, layer, bucket, cfg,
+                                    blob_dir, &wb, attn_ins, 1, attn_outs, 3);
         if (!ok) {
-            fprintf(stderr, "ANE prefill: attention L%d eval failed\n", layer);
+            fprintf(stderr, "ANE prefill: attention L%d failed\n", layer);
             CFRelease(ioHidden); CFRelease(ioAttnOut); CFRelease(ioK); CFRelease(ioV);
             return false;
         }
@@ -248,32 +273,13 @@ bool orion_ane_prefill(const OrionGPT2Weights* w,
         ioHidden = ioAttnOut;
 
         // --- FFN ---
-        OrionProgram *ffn_prog = orion_cache_lookup("prefill_ffn", layer, &wb);
-        if (ffn_prog) {
-            cache_hits++;
-        } else {
-            NSString *ffn_mil = orion_milgen_gpt2_prefill_ffn(layer, bucket, cfg);
-            NSDictionary *ffn_wdict = build_ffn_wdict(layer, dir);
-            char tag[64];
-            snprintf(tag, sizeof(tag), "prefill_ffn_L%d", layer);
-            ffn_prog = orion_compile_mil(ffn_mil.UTF8String, ffn_wdict, tag);
-            if (!ffn_prog) {
-                fprintf(stderr, "ANE prefill: FFN L%d compile failed\n", layer);
-                CFRelease(ioHidden);
-                return false;
-            }
-            orion_cache_store("prefill_ffn", layer, &wb, ffn_prog);
-            cache_misses++;
-        }
-
         IOSurfaceRef ioFFNOut = make_f32_surface(count);
         IOSurfaceRef ffn_ins[]  = {ioHidden};
         IOSurfaceRef ffn_outs[] = {ioFFNOut};
-        ok = orion_eval(ffn_prog, ffn_ins, 1, ffn_outs, 1);
-        // Do NOT release ffn_prog — cache owns it
-
+        ok = orion_kernel_eval(&kPrefillFFN, layer, bucket, cfg,
+                               blob_dir, &wb, ffn_ins, 1, ffn_outs, 1);
         if (!ok) {
-            fprintf(stderr, "ANE prefill: FFN L%d eval failed\n", layer);
+            fprintf(stderr, "ANE prefill: FFN L%d failed\n", layer);
             CFRelease(ioHidden); CFRelease(ioFFNOut);
             return false;
         }
@@ -283,31 +289,15 @@ bool orion_ane_prefill(const OrionGPT2Weights* w,
     }
 
     // Final LayerNorm on ANE
-    OrionProgram *ln_prog = orion_cache_lookup("prefill_final_ln", -1, &wb);
-    if (ln_prog) {
-        cache_hits++;
-    } else {
-        NSString *ln_mil = orion_milgen_gpt2_final_ln(bucket, cfg);
-        NSDictionary *ln_wdict = build_final_ln_wdict(dir);
-        ln_prog = orion_compile_mil(ln_mil.UTF8String, ln_wdict, "prefill_final_ln");
-        if (!ln_prog) {
-            fprintf(stderr, "ANE prefill: final LN compile failed\n");
-            CFRelease(ioHidden);
-            return false;
-        }
-        orion_cache_store("prefill_final_ln", -1, &wb, ln_prog);
-        cache_misses++;
-    }
-
     IOSurfaceRef ioLNOut = make_f32_surface(count);
     IOSurfaceRef ln_ins[]  = {ioHidden};
     IOSurfaceRef ln_outs[] = {ioLNOut};
-    bool ok = orion_eval(ln_prog, ln_ins, 1, ln_outs, 1);
-    // Do NOT release ln_prog — cache owns it
+    bool ok = orion_kernel_eval(&kPrefillFinalLN, -1, bucket, cfg,
+                                blob_dir, &wb, ln_ins, 1, ln_outs, 1);
     CFRelease(ioHidden);
 
     if (!ok) {
-        fprintf(stderr, "ANE prefill: final LN eval failed\n");
+        fprintf(stderr, "ANE prefill: final LN failed\n");
         CFRelease(ioLNOut);
         return false;
     }
@@ -337,7 +327,8 @@ bool orion_ane_prefill(const OrionGPT2Weights* w,
     // Update KV cache position
     kv->current_len = prompt_len;
 
-    fprintf(stderr, "ANE prefill: cache %d hits, %d misses (%d programs cached, %d compiles total)\n",
-            cache_hits, cache_misses, orion_cache_size(), orion_compile_count());
+    int compiles_after = orion_compile_count();
+    fprintf(stderr, "ANE prefill: %d new compiles (%d programs cached, %d compiles total)\n",
+            compiles_after - compiles_before, orion_cache_size(), compiles_after);
     return true;
 }

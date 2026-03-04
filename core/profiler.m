@@ -39,7 +39,7 @@ static int cmp_double(const void* a, const void* b) {
     return (da > db) - (da < db);
 }
 
-OrionPerfMetrics orion_prof_finish(int total_tokens, double total_flops) {
+OrionPerfMetrics orion_prof_finish(int total_tokens __attribute__((unused)), double total_flops) {
     OrionPerfMetrics m = {0};
 
     m.prefill_ms = g_prof.prefill_ms;
