@@ -28,6 +28,7 @@ tests/test_decode_ane
 tests/test_decode_ane_step
 tests/test_infer_golden_ane
 tests/test_bench_decode
+tests/test_delta_compile
 tests/*.dSYM/
 
 # Weight blobs (large binary files)
@@ -65,6 +66,8 @@ data/
 experiments/*.o
 experiments/hello_mil
 experiments/spike_single_token
+experiments/spike_e5_binary
+experiments/spike_e5_patch
 
 # Docs (generated logs)
 docs/*.txt

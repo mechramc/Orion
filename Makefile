@@ -108,7 +108,8 @@ TEST_NAMES = \
 	test_decode_ane \
 	test_decode_ane_step \
 	test_infer_golden_ane \
-	test_bench_decode
+	test_bench_decode \
+	test_delta_compile
 
 # Compiler tests (link with compiler objects, not full library)
 COMPILER_TEST_NAMES = \

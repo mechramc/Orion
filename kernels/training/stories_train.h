@@ -163,6 +163,12 @@ void orion_trainer_scale_grads(OrionTrainer* trainer, float scale);
 /// into ANE programs. Returns false if any compile fails.
 bool orion_trainer_recompile(OrionTrainer* trainer, const char* weight_path);
 
+/// Delta-recompile: patch weights into existing compiled programs without
+/// recompilation. Uses orion_program_patch_weights to skip the ANE compiler
+/// entirely. Falls back to full recompile if any patch fails.
+/// Does NOT increment orion_compile_count() on success.
+bool orion_trainer_recompile_delta(OrionTrainer* trainer, const char* weight_path);
+
 /// Check if we're approaching the ANE compile limit (~119 per process).
 /// Returns true if a restart is recommended before the next recompile.
 /// budget_remaining: if non-NULL, set to remaining compiles before limit.

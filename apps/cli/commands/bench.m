@@ -982,12 +982,9 @@ static int bench_training(int steps, int grad_accum, const char *weights_path,
                 double ta1 = time_ms();
                 double adam_ms = ta1 - ta0;
 
-                // Recompile if needed
+                // Delta-recompile (T152: no ANE compilation)
                 double tr0 = time_ms();
-                int budget = 0;
-                if (!orion_trainer_needs_restart(trainer, &budget)) {
-                    orion_trainer_recompile(trainer, weights_path);
-                }
+                orion_trainer_recompile_delta(trainer, weights_path);
                 double recomp_ms = time_ms() - tr0;
 
                 double total_step = step_fwd + step_bwd + adam_ms + recomp_ms;

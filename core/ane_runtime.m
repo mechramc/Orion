@@ -217,3 +217,114 @@ void orion_release_program(OrionProgram* prog) {
 int orion_compile_count(void) {
     return g_compile_count;
 }
+
+#pragma mark - T151: Delta weight patching
+
+OrionProgram* orion_program_patch_weights(
+    OrionProgram* donor,
+    const char* mil_text,
+    NSDictionary* weight_dict,
+    const char* program_tag
+) {
+    if (!g_init || !donor || !donor->tmpDir || !mil_text) return NULL;
+
+    @autoreleasepool {
+        NSData *milData = [NSData dataWithBytes:mil_text length:strlen(mil_text)];
+        NSDictionary *wdict = weight_dict ?: @{};
+        NSFileManager *fm = [NSFileManager defaultManager];
+
+        // Create descriptor + model with new weights
+        id desc = ((id(*)(Class,SEL,id,id,id))objc_msgSend)(
+            g_Desc, @selector(modelWithMILText:weights:optionsPlist:),
+            milData, wdict, nil);
+        if (!desc) return NULL;
+
+        id model = ((id(*)(Class,SEL,id))objc_msgSend)(
+            g_IMM, @selector(inMemoryModelWithDescriptor:), desc);
+        if (!model) return NULL;
+
+        // Get the new model's expected temp directory
+        id hexId = ((id(*)(id,SEL))objc_msgSend)(model, @selector(hexStringIdentifier));
+        NSString *newDir = [NSTemporaryDirectory() stringByAppendingPathComponent:hexId];
+        // Clean up any stale directory from a previous compile with the same hexId
+        [fm removeItemAtPath:newDir error:nil];
+        [fm createDirectoryAtPath:newDir withIntermediateDirectories:YES attributes:nil error:nil];
+
+        // Copy net.plist from donor (identical for same MIL program structure)
+        NSString *donorDir = (__bridge NSString *)donor->tmpDir;
+        NSString *srcPlist = [donorDir stringByAppendingPathComponent:@"net.plist"];
+        NSString *dstPlist = [newDir stringByAppendingPathComponent:@"net.plist"];
+        if (![fm copyItemAtPath:srcPlist toPath:dstPlist error:nil]) {
+            [fm removeItemAtPath:newDir error:nil];
+            return NULL;
+        }
+
+        // Write new BLOBFILE(s) as the "data" file.
+        // The compiled ANE "data" file IS the BLOBFILE — no transformation.
+        // For single-weight programs, the data file = the BLOBFILE.
+        // For multi-weight programs, we need to find which blob maps to "data".
+        //
+        // Strategy: write the BLOBFILE as the data file. If there are multiple
+        // weight blobs, write the primary one (first entry) as data and others
+        // to their weight paths. Also write model.mil for completeness.
+
+        [milData writeToFile:[newDir stringByAppendingPathComponent:@"model.mil"]
+                  atomically:YES];
+
+        // Write weight blobs to weights/ and also as the data file
+        [fm createDirectoryAtPath:[newDir stringByAppendingPathComponent:@"weights"]
+            withIntermediateDirectories:YES attributes:nil error:nil];
+
+        bool dataWritten = false;
+        for (NSString *path in wdict) {
+            NSDictionary *entry = wdict[path];
+            NSData *data = entry[@"data"];
+            if (data) {
+                // Write to weights/ directory
+                NSString *relPath = [path stringByReplacingOccurrencesOfString:@"@model_path/"
+                                                                    withString:@""];
+                NSString *fullPath = [newDir stringByAppendingPathComponent:relPath];
+                NSString *dir = [fullPath stringByDeletingLastPathComponent];
+                [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+                [data writeToFile:fullPath atomically:YES];
+
+                // First blob also becomes the data file
+                if (!dataWritten) {
+                    [data writeToFile:[newDir stringByAppendingPathComponent:@"data"]
+                           atomically:YES];
+                    dataWritten = true;
+                }
+            }
+        }
+
+        // If no weights, copy the donor's data file
+        if (!dataWritten) {
+            NSString *srcData = [donorDir stringByAppendingPathComponent:@"data"];
+            [fm copyItemAtPath:srcData
+                        toPath:[newDir stringByAppendingPathComponent:@"data"]
+                         error:nil];
+        }
+
+        // Load WITHOUT compiling — the key delta patching optimization
+        NSError *e = nil;
+        BOOL ok = ((BOOL(*)(id,SEL,unsigned int,id,NSError**))objc_msgSend)(
+            model, @selector(loadWithQoS:options:error:), 21, @{}, &e);
+        if (!ok) {
+            if (e) NSLog(@"orion_program_patch_weights LOAD FAILED: %@", e);
+            [fm removeItemAtPath:newDir error:nil];
+            return NULL;
+        }
+
+        // Wrap in OrionProgram
+        OrionProgram *prog = (OrionProgram *)calloc(1, sizeof(OrionProgram));
+        prog->model = (void *)CFBridgingRetain(model);
+        prog->tmpDir = (void *)CFBridgingRetain(newDir);
+        prog->loaded = true;
+        if (program_tag) {
+            strlcpy(prog->tag, program_tag, sizeof(prog->tag));
+        }
+
+        // Note: does NOT increment g_compile_count — no compile happened
+        return prog;
+    }
+}

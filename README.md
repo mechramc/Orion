@@ -202,6 +202,16 @@ Capabilities:
 
 **Status**: Complete. 32/32 compiler tasks + milgen fully replaced. 21/21 tests pass.
 
+### Stage 2.5 — Orion v2.0 *(in progress)*
+
+Three workstreams driven by community feedback (r/MachineLearning) and deferred v1 goals:
+
+- **Delta Compilation** — Surgical weight patching in compiled ANE artifacts, bypassing full recompilation. Training currently spends 82% of wall time on compilation (4.2s compile vs 908ms compute). Target: >5x reduction in compile time per step.
+- **LoRA Adapter-as-Input** — Low-Rank Adaptation where adapter matrices A, B are passed as IOSurface inputs. Enables hot-swapping adapters without recompilation.
+- **SwiftUI Demo App** — Minimal macOS app with live inference, model selection, and real-time ANE metrics.
+
+**Status**: In progress. Branch: `v2.0-dev`. 20 tasks (T149-T168).
+
 ### Stage 3 — Orion Platform *(future)*
 
 Developer toolchain for building local AI applications on Apple devices. Model packaging, deployment, and a simple CLI/API:
@@ -291,7 +301,10 @@ python model/convert/hf_to_blobs_llama.py    # → model/blobs/stories110m/
 
 ## Project Status
 
-148 of 148 tasks complete across 13 phases. See [STATUS.md](STATUS.md) for the full dashboard and [RESULTS.md](RESULTS.md) for comprehensive benchmarks.
+**v1.0**: 148/148 tasks complete across 13 phases. Tagged `v1.0`.
+**v2.0**: 20 new tasks (T149-T168) across 3 workstreams. Branch: `v2.0-dev`.
+
+See [STATUS.md](STATUS.md) for the full dashboard and [RESULTS.md](RESULTS.md) for comprehensive benchmarks.
 
 | Phase | Status | Highlights |
 |-------|--------|------------|

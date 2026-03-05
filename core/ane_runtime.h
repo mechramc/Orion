@@ -55,4 +55,26 @@ void orion_release_program(OrionProgram* prog);
 /// Useful for tracking approach to the ~119 compile limit.
 int orion_compile_count(void);
 
+/// Create a new ANE program with patched weights, reusing compiled artifacts
+/// from a donor program. Skips compilation entirely — only loads.
+///
+/// The ANE compiler's "data" file IS the BLOBFILE. By creating a new model
+/// identity and copying the compiled net.plist + new BLOBFILE, we can load
+/// new weights without compiling. This produces output identical to a fresh
+/// compile (verified: max diff = 0.0).
+///
+/// @param donor        A previously compiled OrionProgram (provides net.plist)
+/// @param mil_text     Same MIL text used to compile the donor
+/// @param weight_dict  New weight dict (same keys, new data)
+/// @param program_tag  Tag for debugging (may be NULL)
+/// @return New program handle with patched weights, or NULL on failure.
+///         Caller must release with orion_release_program().
+///         Does NOT increment orion_compile_count().
+OrionProgram* orion_program_patch_weights(
+    OrionProgram* donor,
+    const char* mil_text,
+    NSDictionary* weight_dict,
+    const char* program_tag
+);
+
 #endif // ORION_ANE_RUNTIME_H

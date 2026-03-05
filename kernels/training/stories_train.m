@@ -988,6 +988,84 @@ bool orion_trainer_recompile(OrionTrainer* t, const char* weight_path) {
     }
 }
 
+#pragma mark - T152: Delta Recompile (weight patching)
+
+static bool patch_layer(OrionLayerKernels* kern, int layer_idx,
+                        const OrionModelConfig* cfg, NSString* weight_dir) {
+    int s = cfg->max_seq;
+    NSString *base = weight_dir;
+
+    NSString *mil;
+    NSDictionary *wdict;
+    OrionProgram *patched;
+
+    // fwd_attn: 6 weight blobs (rms1, wq, wk, wv, wo, causal_mask)
+    mil = compiler_fwd_attn_adapter(layer_idx, s, cfg);
+    wdict = wdict_fwd_attn_adapter(layer_idx, s, base.UTF8String);
+    patched = orion_program_patch_weights(kern->fwd_attn, mil.UTF8String, wdict, "fwdAttn");
+    if (!patched) return false;
+    orion_release_program(kern->fwd_attn);
+    kern->fwd_attn = patched;
+
+    // fwd_ffn: 4 weight blobs (rms2, w1, w3, w2)
+    mil = compiler_fwd_ffn_adapter(layer_idx, s, cfg);
+    wdict = wdict_fwd_ffn_adapter(layer_idx, s, base.UTF8String);
+    patched = orion_program_patch_weights(kern->fwd_ffn, mil.UTF8String, wdict, "fwdFFN");
+    if (!patched) return false;
+    orion_release_program(kern->fwd_ffn);
+    kern->fwd_ffn = patched;
+
+    // ffn_bwd: 3 weight blobs (w2t, w1t, w3t)
+    mil = compiler_ffn_bwd_adapter(layer_idx, s, cfg);
+    wdict = wdict_ffn_bwd_adapter(layer_idx, s, base.UTF8String);
+    patched = orion_program_patch_weights(kern->ffn_bwd, mil.UTF8String, wdict, "ffnBwd");
+    if (!patched) return false;
+    orion_release_program(kern->ffn_bwd);
+    kern->ffn_bwd = patched;
+
+    // sdpa_bwd1: 2 weight blobs (wot, causal_mask)
+    mil = compiler_sdpa_bwd1_adapter(layer_idx, s, cfg);
+    wdict = wdict_sdpa_bwd1_adapter(layer_idx, s, base.UTF8String);
+    patched = orion_program_patch_weights(kern->sdpa_bwd1, mil.UTF8String, wdict, "sdpaBwd1");
+    if (!patched) return false;
+    orion_release_program(kern->sdpa_bwd1);
+    kern->sdpa_bwd1 = patched;
+
+    // sdpa_bwd2: NO weights — keep existing program unchanged
+
+    // qkv_bwd: 3 weight blobs (wqt, wkt, wvt)
+    mil = compiler_qkv_bwd_adapter(layer_idx, s, cfg);
+    wdict = wdict_qkv_bwd_adapter(layer_idx, s, base.UTF8String);
+    patched = orion_program_patch_weights(kern->qkv_bwd, mil.UTF8String, wdict, "qkvBwd");
+    if (!patched) return false;
+    orion_release_program(kern->qkv_bwd);
+    kern->qkv_bwd = patched;
+
+    return true;
+}
+
+bool orion_trainer_recompile_delta(OrionTrainer* t, const char* weight_path) {
+    @autoreleasepool {
+        int nl = t->n_layers;
+        NSString *base = @(weight_path);
+
+        // Write updated weights to disk
+        for (int L = 0; L < nl; L++) {
+            save_layer_weights(&t->weights[L], L, t->cfg, weight_path);
+        }
+
+        // Delta-patch each layer (no compilation)
+        for (int L = 0; L < nl; L++) {
+            if (!patch_layer(&t->kernels[L], L, t->cfg, base)) {
+                NSLog(@"Delta patch failed for layer %d — falling back to full recompile", L);
+                return orion_trainer_recompile(t, weight_path);
+            }
+        }
+
+        return true;
+    }
+}
+
 #pragma mark - T077: Compile Budget Check
 
 bool orion_trainer_needs_restart(const OrionTrainer* t, int* budget_remaining) {

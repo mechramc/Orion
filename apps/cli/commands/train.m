@@ -256,22 +256,13 @@ int orion_cmd_train(int argc, const char* argv[]) {
                 }
             }
 
-            // Check compile budget for recompile
-            int budget = 0;
-            if (orion_trainer_needs_restart(trainer, &budget)) {
-                char ckpt_path[512];
-                snprintf(ckpt_path, sizeof(ckpt_path), "%s/ckpt_restart_%05d.bin",
-                         args.checkpoint_dir, step + 1);
-                orion_checkpoint_save(trainer, ckpt_path, step + 1, step_loss);
-                fprintf(stderr, "  Compile budget exhausted (%d remaining). "
-                        "Saved %s. Restart with --resume.\n", budget, ckpt_path);
-                break;
-            }
+            // T154: Compile budget check removed — delta recompile (T152) skips
+            // the ANE compiler entirely, so the ~119 compile limit no longer applies.
 
-            // Recompile with updated weights (Mode A)
+            // Delta-recompile with updated weights (T152: no ANE compilation)
             double rc_start = time_seconds();
-            if (!orion_trainer_recompile(trainer, args.weight_path)) {
-                fprintf(stderr, "Error: recompile failed at step %d\n", step + 1);
+            if (!orion_trainer_recompile_delta(trainer, args.weight_path)) {
+                fprintf(stderr, "Error: delta recompile failed at step %d\n", step + 1);
                 break;
             }
             total_recompile_ms += (time_seconds() - rc_start) * 1000.0;
