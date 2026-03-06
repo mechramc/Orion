@@ -139,7 +139,7 @@ This turns Orion into a **measurement tool** for ANE performance, not just an in
            │          Core Runtime                  │
            │  orion_compile_mil → OrionProgram      │
            │  orion_eval (IOSurface I/O)            │
-           │  orion_release_program                 │
+           │  Delta reload (unload→patch→reload)    │
            └──────────────┬───────────────────────┘
                           │
            ┌──────────────┴───────────────────────┐
@@ -156,7 +156,7 @@ This turns Orion into a **measurement tool** for ANE performance, not just an in
 |-------|------|--------|
 | `OrionKernel` | Wraps MIL generation + weight dict + cache + compile + eval into one call | Done |
 | `OrionModelConfig` | Model architecture description (layers, heads, dims, vocab) | Done |
-| `OrionRuntime` | ANE init + compile budget tracking + kernel dispatch | Done |
+| `OrionRuntime` | ANE init + delta reload + kernel dispatch | Done |
 | `OrionCompiler` | Graph IR → optimized MIL text (validate, optimize, codegen) | Done |
 
 These abstractions make Orion a **general ANE model runtime** rather than a single-model demo. Adding a new model means implementing its compiler frontend (graph builder) and weight layout — the compile-cache-eval machinery is shared.
@@ -165,7 +165,7 @@ These abstractions make Orion a **general ANE model runtime** rather than a sing
 
 **Inference**: Tokenize → embed (CPU) → 12 transformer layers on ANE (bucketed prefill or per-token decode) → final layernorm (ANE) → logits projection (CPU, wte is 73MB — too large for ANE SRAM) → sample → repeat.
 
-**Training**: Embed (CPU) → forward layers (ANE, 6 outputs per layer for backward reuse) → loss (CPU) → backward layers (ANE, dx path) → dW accumulation (CPU, GCD async) → Adam (CPU) → delta weight reload (unload → update BLOBFILE on disk → reload, ~494ms for 60 kernels).
+**Training** (single process, no restarts): 72 ANE programs compiled once at startup (~4.5s). Each step: embed (CPU) → forward layers (ANE, 6 outputs per layer for backward reuse) → loss (CPU) → backward layers (ANE, dx path) → dW accumulation (CPU, GCD async) → Adam (CPU) → delta weight reload (unload → update BLOBFILE on disk → reload, ~494ms for 60 kernels). Zero compiles during training — the ~119 compile-per-process limit never applies.
 
 **Tensor layout**: All ANE I/O uses `fp16 [1, C, 1, S]` on IOSurface-backed memory. CPU↔ANE data transfer transposes between `[seq, d_model]` and `[d_model, seq]`.
 
@@ -242,7 +242,7 @@ orion chat
 **Compile/eval failures:**
 - ANE rejects the `concat` MIL op — must use multi-output programs
 - `gelu` is not a valid MIL op — decompose to tanh approximation
-- ~119 compile limit per process — managed via delta compilation (no new compiles needed during training)
+- ~119 compile limit per process — bypassed entirely by delta compilation (programs compiled once at startup, only reloaded during training)
 - Minimum ~49KB IOSurface allocation — `seq_len=1` compiles but fails at eval
 - Multi-output AND multi-input require **uniform IOSurface allocation sizes** — pad to max
 - Weight dict must be `@{}` (empty dict), not `nil`, for weight-free programs
