@@ -18,6 +18,7 @@ typedef struct {
     const char *data_path;      // --dataset
     const char *checkpoint_dir; // --checkpoint_dir
     const char *resume;         // --resume (checkpoint to resume from)
+    const char *csv_path;       // --csv (per-step CSV log)
     int steps;                  // --steps (total steps)
     int grad_accum;             // --grad_accum
     int checkpoint_every;       // --checkpoint_every
@@ -51,6 +52,7 @@ static TrainArgs parse_train_args(int argc, const char* argv[]) {
         .data_path = NULL,
         .checkpoint_dir = "./checkpoints",
         .resume = NULL,
+        .csv_path = NULL,
         .steps = 100,
         .grad_accum = STORIES_ACCUM_STEPS,
         .checkpoint_every = 25,
@@ -80,6 +82,8 @@ static TrainArgs parse_train_args(int argc, const char* argv[]) {
             args.lr = atof(argv[++i]);
         } else if (strcmp(argv[i], "--seq") == 0 && i + 1 < argc) {
             args.seq_len = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--csv") == 0 && i + 1 < argc) {
+            args.csv_path = argv[++i];
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             args.help = true;
@@ -211,6 +215,13 @@ int orion_cmd_train(int argc, const char* argv[]) {
         double step_flops = estimate_step_flops(cfg, args.grad_accum);
         int steps_completed = 0;
 
+        // CSV log
+        FILE *csv = NULL;
+        if (args.csv_path) {
+            csv = fopen(args.csv_path, "w");
+            if (csv) fprintf(csv, "step,loss,train_ms,reload_ms,total_ms,tflops\n");
+        }
+
         // Training loop
         double wall_start = time_seconds();
         fprintf(stderr, "\nTraining: steps=%d, grad_accum=%d, lr=%.1e, checkpoint_every=%d\n\n",
@@ -265,10 +276,20 @@ int orion_cmd_train(int argc, const char* argv[]) {
                 fprintf(stderr, "Error: delta recompile failed at step %d\n", step + 1);
                 break;
             }
-            total_recompile_ms += (time_seconds() - rc_start) * 1000.0;
+            double rc_ms = (time_seconds() - rc_start) * 1000.0;
+            total_recompile_ms += rc_ms;
+
+            // CSV log
+            if (csv) {
+                double step_total_ms = (time_seconds() - step_start) * 1000.0;
+                fprintf(csv, "%d,%.4f,%.1f,%.1f,%.1f,%.3f\n",
+                        step + 1, step_loss, train_time * 1000.0, rc_ms, step_total_ms, step_tflops);
+                if ((step + 1) % 50 == 0) fflush(csv);
+            }
         }
 
         double total_time = time_seconds() - wall_start;
+        if (csv) { fclose(csv); csv = NULL; }
 
         // --- Training Summary ---
         fprintf(stderr, "\n--- Training Summary ---\n");

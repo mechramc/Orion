@@ -27,11 +27,11 @@ Three inference modes: CPU-only, ANE prefill + CPU decode (hybrid), and ANE full
 
 | Metric | Value |
 |--------|-------|
-| Avg train time | **875 ms/step** |
-| Avg recompile time | **541 ms/step** |
-| Avg total step time | **1,416 ms/step** |
-| Throughput | 0.636 TFLOPS |
-| Recompile % of step | 38.2% |
+| Avg train time | **849 ms/step** |
+| Avg recompile time | **494 ms/step** |
+| Avg total step time | **1,345 ms/step** |
+| Throughput | 0.656 TFLOPS |
+| Recompile % of step | 36.8% |
 | Gradient accumulation | 4 microbatches |
 | exec() restarts needed | **0** (delta reload bypasses compile limit) |
 
@@ -43,7 +43,7 @@ Three inference modes: CPU-only, ANE prefill + CPU decode (hybrid), and ANE full
 |--------|-------|
 | Total steps | 1,000 |
 | Initial loss | 11.83 |
-| Wall time | **23 minutes** |
+| Wall time | **22.4 minutes** |
 | NaN occurrences | **0 / 1,000** |
 | Memory leak | None (stable RSS across all steps) |
 | Checkpoints saved | 10 (every 100 steps) |
@@ -54,15 +54,15 @@ Training runs in a single process — no `exec()` restarts, no process boundarie
 
 | Metric | v1.0 (Full Recompile) | v2.0 (Delta Reload) | Improvement |
 |--------|----------------------|---------------------|-------------|
-| Avg train time | 908 ms/step | 875 ms/step | ~same |
-| Avg recompile time | 4,200 ms/step | 541 ms/step | **7.8x** |
-| Avg total step time | 5,108 ms/step | 1,416 ms/step | **3.6x** |
-| Recompile % of step | 83.9% | 38.2% | -45.7 pp |
-| 1000-step wall time | ~85 min | 23 min | **3.7x** |
+| Avg train time | 908 ms/step | 849 ms/step | ~same |
+| Avg recompile time | 4,200 ms/step | 494 ms/step | **8.5x** |
+| Avg total step time | 5,108 ms/step | 1,345 ms/step | **3.8x** |
+| Recompile % of step | 83.9% | 36.8% | -47.1 pp |
+| 1000-step wall time | ~85 min | 22.4 min | **3.8x** |
 | Process model | 1 step/process (exec restart) | Single process (no restart) | Eliminated |
 | Compile limit risk | ~119 budget, must restart | N/A (0 compiles during training) | Eliminated |
 
-The 7.8x recompile speedup comes from bypassing `ANECCompile()`. Instead of creating new model descriptors and compiling MIL text (4.2s for 60 weight-bearing kernels), delta reload does unload→file update→reload on existing model objects (~540ms for 60 kernels, or ~9ms/kernel).
+The 8.5x recompile speedup comes from bypassing `ANECCompile()`. Instead of creating new model descriptors and compiling MIL text (4.2s for 60 weight-bearing kernels), delta reload does unload→file update→reload on existing model objects (~494ms for 60 kernels, or ~8ms/kernel).
 
 ---
 
