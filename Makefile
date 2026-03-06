@@ -22,7 +22,8 @@ CORE_SRC = \
 	core/checkpoint.m \
 	core/model_registry.m \
 	core/kernel.m \
-	core/runtime.m
+	core/runtime.m \
+	core/lora_adapter.m
 
 INFERENCE_SRC = \
 	kernels/inference/prefill_ane.m \
@@ -65,7 +66,8 @@ COMPILER_C_SRC = \
 	compiler/frontends/gpt2_decode.c \
 	compiler/frontends/gpt2_final.c \
 	compiler/frontends/classifier_softmax.c \
-	compiler/frontends/stories_train.c
+	compiler/frontends/stories_train.c \
+	compiler/frontends/lora.c
 
 COMPILER_M_SRC = \
 	compiler/codegen.m \
@@ -109,7 +111,8 @@ TEST_NAMES = \
 	test_decode_ane_step \
 	test_infer_golden_ane \
 	test_bench_decode \
-	test_delta_compile
+	test_delta_compile \
+	test_lora
 
 # Compiler tests (link with compiler objects, not full library)
 COMPILER_TEST_NAMES = \

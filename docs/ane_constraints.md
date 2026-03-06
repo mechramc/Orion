@@ -149,6 +149,42 @@ Always pass an empty `NSDictionary` for weight-free programs.
 
 ---
 
+## 12. Multi-Input Requires Uniform Input Buffer Sizes
+
+**What happens:** `ANEProgramProcessRequestDirect() Failed with status=0x1d` at eval time when input IOSurfaces have different allocation sizes — even though the MIL declares them with different shapes.
+
+**Example:** LoRA program with `x [1,768,1,32]` and `lora_A [1,768,1,16]`: allocating surfaces as `orion_tensor_create(768, 32)` and `orion_tensor_create(768, 16)` fails at eval. Both surfaces must be allocated with `orion_tensor_create(768, 32)`.
+
+**Workaround:** Allocate all input IOSurfaces with the same `allocSize` (use the maximum). Write packed data into the beginning of oversized surfaces — ANE reads the flat buffer as packed `[1,C,1,S]` where S is the MIL-declared shape, regardless of actual surface size.
+
+**Discovered:** T163 (LoRA Tests). Same constraint as outputs (#2 above).
+
+---
+
+## 13. Multi-Input Surfaces Ordered Alphabetically by MIL Parameter Name
+
+**What happens:** Input surfaces provided in the wrong order produce silently wrong data. The output is non-zero but mathematically incorrect — inputs are mapped to the wrong MIL parameters.
+
+**Example:** MIL declares `func main(x, lora_A, lora_B)` — declaration order. Inputs must be provided as `{lora_A, lora_B, x}` — alphabetical order by parameter name.
+
+**Workaround:** Sort input surfaces alphabetically by MIL parameter name. Same rule as output ordering (#3 above).
+
+**Discovered:** T163 (LoRA Tests). Tested all 6 permutations of 3 inputs; only alphabetical order produces correct output.
+
+---
+
+## 14. ANE Reads Flat Buffer as Packed Shape Data
+
+**What happens:** When a MIL parameter declares shape `[1,C,1,S]` but the IOSurface is larger (e.g., allocated for `[1,C,1,S_max]`), ANE reads the first `C*S` contiguous fp16 values from the flat buffer. It does NOT use stride or padding — the data must be packed.
+
+**Example:** `lora_A` declared as `[1,768,1,16]` in MIL, surface allocated as `[1,768,1,32]`. ANE reads bytes 0..24575 (768*16*2 bytes) as packed channel-major data. If you write data with stride-32 layout (interleaving data and padding per channel), ANE reads the wrong values.
+
+**Workaround:** Write adapter data packed at the start of the surface: `orion_tensor_write_f32(surf, packed_data, C*S)`. Do NOT pad to the surface's full width.
+
+**Discovered:** T163 (LoRA Tests). Stride-padded data produced ~260x smaller LoRA contribution than expected.
+
+---
+
 ## Quick Reference Table
 
 | # | Constraint | Severity | Symptom | Source |
@@ -164,3 +200,6 @@ Always pass an empty `NSDictionary` for weight-free programs.
 | 9 | milText must be NSData* | Crash | Immediate crash | Orion |
 | 10 | No `gelu` MIL op | Compile fail | `ANECCompile() FAILED` | Orion |
 | 11 | Weight dict must be `@{}` | Crash | Immediate crash | Orion |
+| 12 | Uniform input buffer sizes | Eval fail | `status=0x1d` | Orion |
+| 13 | Alphabetical input ordering | Silent wrong data | Inputs misassigned | Orion |
+| 14 | Flat buffer = packed shape data | Silent wrong data | ~260x smaller values | Orion |

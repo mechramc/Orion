@@ -995,51 +995,29 @@ static bool patch_layer(OrionLayerKernels* kern, int layer_idx,
     int s = cfg->max_seq;
     NSString *base = weight_dir;
 
-    NSString *mil;
     NSDictionary *wdict;
-    OrionProgram *patched;
 
     // fwd_attn: 6 weight blobs (rms1, wq, wk, wv, wo, causal_mask)
-    mil = compiler_fwd_attn_adapter(layer_idx, s, cfg);
     wdict = wdict_fwd_attn_adapter(layer_idx, s, base.UTF8String);
-    patched = orion_program_patch_weights(kern->fwd_attn, mil.UTF8String, wdict, "fwdAttn");
-    if (!patched) return false;
-    orion_release_program(kern->fwd_attn);
-    kern->fwd_attn = patched;
+    if (!orion_program_reload_weights(kern->fwd_attn, wdict)) return false;
 
     // fwd_ffn: 4 weight blobs (rms2, w1, w3, w2)
-    mil = compiler_fwd_ffn_adapter(layer_idx, s, cfg);
     wdict = wdict_fwd_ffn_adapter(layer_idx, s, base.UTF8String);
-    patched = orion_program_patch_weights(kern->fwd_ffn, mil.UTF8String, wdict, "fwdFFN");
-    if (!patched) return false;
-    orion_release_program(kern->fwd_ffn);
-    kern->fwd_ffn = patched;
+    if (!orion_program_reload_weights(kern->fwd_ffn, wdict)) return false;
 
     // ffn_bwd: 3 weight blobs (w2t, w1t, w3t)
-    mil = compiler_ffn_bwd_adapter(layer_idx, s, cfg);
     wdict = wdict_ffn_bwd_adapter(layer_idx, s, base.UTF8String);
-    patched = orion_program_patch_weights(kern->ffn_bwd, mil.UTF8String, wdict, "ffnBwd");
-    if (!patched) return false;
-    orion_release_program(kern->ffn_bwd);
-    kern->ffn_bwd = patched;
+    if (!orion_program_reload_weights(kern->ffn_bwd, wdict)) return false;
 
     // sdpa_bwd1: 2 weight blobs (wot, causal_mask)
-    mil = compiler_sdpa_bwd1_adapter(layer_idx, s, cfg);
     wdict = wdict_sdpa_bwd1_adapter(layer_idx, s, base.UTF8String);
-    patched = orion_program_patch_weights(kern->sdpa_bwd1, mil.UTF8String, wdict, "sdpaBwd1");
-    if (!patched) return false;
-    orion_release_program(kern->sdpa_bwd1);
-    kern->sdpa_bwd1 = patched;
+    if (!orion_program_reload_weights(kern->sdpa_bwd1, wdict)) return false;
 
     // sdpa_bwd2: NO weights — keep existing program unchanged
 
     // qkv_bwd: 3 weight blobs (wqt, wkt, wvt)
-    mil = compiler_qkv_bwd_adapter(layer_idx, s, cfg);
     wdict = wdict_qkv_bwd_adapter(layer_idx, s, base.UTF8String);
-    patched = orion_program_patch_weights(kern->qkv_bwd, mil.UTF8String, wdict, "qkvBwd");
-    if (!patched) return false;
-    orion_release_program(kern->qkv_bwd);
-    kern->qkv_bwd = patched;
+    if (!orion_program_reload_weights(kern->qkv_bwd, wdict)) return false;
 
     return true;
 }
@@ -1050,17 +1028,23 @@ bool orion_trainer_recompile_delta(OrionTrainer* t, const char* weight_path) {
         NSString *base = @(weight_path);
 
         // Write updated weights to disk
+        double t0 = CFAbsoluteTimeGetCurrent();
         for (int L = 0; L < nl; L++) {
             save_layer_weights(&t->weights[L], L, t->cfg, weight_path);
         }
+        double save_ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000.0;
 
         // Delta-patch each layer (no compilation)
+        double t1 = CFAbsoluteTimeGetCurrent();
         for (int L = 0; L < nl; L++) {
             if (!patch_layer(&t->kernels[L], L, t->cfg, base)) {
                 NSLog(@"Delta patch failed for layer %d — falling back to full recompile", L);
                 return orion_trainer_recompile(t, weight_path);
             }
         }
+        double patch_ms = (CFAbsoluteTimeGetCurrent() - t1) * 1000.0;
+        NSLog(@"Delta: save=%.1fms patch=%.1fms total=%.1fms",
+              save_ms, patch_ms, save_ms + patch_ms);
 
         return true;
     }

@@ -29,6 +29,7 @@ tests/test_decode_ane_step
 tests/test_infer_golden_ane
 tests/test_bench_decode
 tests/test_delta_compile
+tests/test_lora
 tests/*.dSYM/
 
 # Weight blobs (large binary files)

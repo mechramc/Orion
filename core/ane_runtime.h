@@ -77,4 +77,18 @@ OrionProgram* orion_program_patch_weights(
     const char* program_tag
 );
 
+/// Reload an existing ANE program with new weights in-place.
+/// Unloads the model, updates weight files on disk, then reloads.
+/// Much faster than orion_program_patch_weights since it skips
+/// descriptor/model creation and MIL parsing.
+///
+/// @param prog         The program to reload (must be loaded)
+/// @param weight_dict  New weight dict (same keys, new data)
+/// @return true on success, false on failure. On failure, program is
+///         in an unloaded state and should be released.
+bool orion_program_reload_weights(
+    OrionProgram* prog,
+    NSDictionary* weight_dict
+);
+
 #endif // ORION_ANE_RUNTIME_H

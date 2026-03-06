@@ -246,17 +246,29 @@ OrionProgram* orion_program_patch_weights(
         // Get the new model's expected temp directory
         id hexId = ((id(*)(id,SEL))objc_msgSend)(model, @selector(hexStringIdentifier));
         NSString *newDir = [NSTemporaryDirectory() stringByAppendingPathComponent:hexId];
-        // Clean up any stale directory from a previous compile with the same hexId
-        [fm removeItemAtPath:newDir error:nil];
-        [fm createDirectoryAtPath:newDir withIntermediateDirectories:YES attributes:nil error:nil];
-
-        // Copy net.plist from donor (identical for same MIL program structure)
         NSString *donorDir = (__bridge NSString *)donor->tmpDir;
-        NSString *srcPlist = [donorDir stringByAppendingPathComponent:@"net.plist"];
-        NSString *dstPlist = [newDir stringByAppendingPathComponent:@"net.plist"];
-        if (![fm copyItemAtPath:srcPlist toPath:dstPlist error:nil]) {
+        bool sameDir = [newDir isEqualToString:donorDir];
+
+        if (sameDir) {
+            // Same hexId as donor (same MIL text + weight dict keys).
+            // Directory and net.plist already exist — just update weight files.
+            // Steal tmpDir ownership from donor so release won't delete the shared dir.
+            CFRelease(donor->tmpDir);
+            donor->tmpDir = NULL;
+        } else {
+            // Different hexId — set up new directory with donor's net.plist
             [fm removeItemAtPath:newDir error:nil];
-            return NULL;
+            [fm createDirectoryAtPath:newDir withIntermediateDirectories:YES attributes:nil error:nil];
+
+            NSString *srcPlist = [donorDir stringByAppendingPathComponent:@"net.plist"];
+            NSString *dstPlist = [newDir stringByAppendingPathComponent:@"net.plist"];
+            NSError *copyErr = nil;
+            if (![fm copyItemAtPath:srcPlist toPath:dstPlist error:&copyErr]) {
+                NSLog(@"patch_weights[%s]: net.plist copy failed: %@ -> %@ err=%@",
+                      program_tag ?: "?", srcPlist, dstPlist, copyErr);
+                [fm removeItemAtPath:newDir error:nil];
+                return NULL;
+            }
         }
 
         // Write new BLOBFILE(s) as the "data" file.
@@ -326,5 +338,49 @@ OrionProgram* orion_program_patch_weights(
 
         // Note: does NOT increment g_compile_count — no compile happened
         return prog;
+    }
+}
+
+bool orion_program_reload_weights(
+    OrionProgram* prog,
+    NSDictionary* weight_dict
+) {
+    if (!g_init || !prog || !prog->model || !prog->tmpDir) return false;
+
+    @autoreleasepool {
+        id model = (__bridge id)prog->model;
+        NSString *dir = (__bridge NSString *)prog->tmpDir;
+        NSDictionary *wdict = weight_dict ?: @{};
+
+        // Unload from ANE
+        if (prog->loaded) {
+            NSError *e = nil;
+            ((BOOL(*)(id,SEL,unsigned int,NSError**))objc_msgSend)(
+                model, @selector(unloadWithQoS:error:), 21, &e);
+            prog->loaded = false;
+        }
+
+        // Update weight files on disk
+        for (NSString *path in wdict) {
+            NSDictionary *entry = wdict[path];
+            NSData *data = entry[@"data"];
+            if (data) {
+                NSString *relPath = [path stringByReplacingOccurrencesOfString:@"@model_path/"
+                                                                    withString:@""];
+                NSString *fullPath = [dir stringByAppendingPathComponent:relPath];
+                [data writeToFile:fullPath atomically:NO];
+            }
+        }
+
+        // Reload with new weights
+        NSError *e = nil;
+        BOOL ok = ((BOOL(*)(id,SEL,unsigned int,id,NSError**))objc_msgSend)(
+            model, @selector(loadWithQoS:options:error:), 21, @{}, &e);
+        if (!ok) {
+            if (e) NSLog(@"orion_program_reload_weights LOAD FAILED: %@", e);
+            return false;
+        }
+        prog->loaded = true;
+        return true;
     }
 }

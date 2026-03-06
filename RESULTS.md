@@ -23,14 +23,59 @@ Three inference modes: CPU-only, ANE prefill + CPU decode (hybrid), and ANE full
 
 ## Training (Stories110M, TinyStories vocab=32000)
 
+### v2.0 — Delta Compilation (current)
+
 | Metric | Value |
 |--------|-------|
-| Step time (mean ± std) | **908 ± 16 ms** |
-| Throughput | 0.612 TFLOPS |
+| Avg train time | **875 ms/step** |
+| Avg recompile time | **541 ms/step** |
+| Avg total step time | **1,416 ms/step** |
+| Throughput | 0.636 TFLOPS |
+| Recompile % of step | 38.2% |
 | Gradient accumulation | 4 microbatches |
+| exec() restarts needed | **0** (delta reload bypasses compile limit) |
+
+**How it works**: ANE programs are compiled once at startup (72 programs, ~4.5s). Each subsequent training step updates weights via `orion_program_reload_weights` — unload the existing ANE program, update BLOBFILE on disk, reload. This bypasses `ANECCompile()` entirely, avoiding both the compilation cost and the ~119 compile limit.
+
+#### v2.0 — 1000-Step Training Run (lr=3e-4, delta compilation)
+
+| Metric | Value |
+|--------|-------|
+| Total steps | 1,000 |
+| Initial loss | 11.83 |
+| Wall time | **23 minutes** |
+| NaN occurrences | **0 / 1,000** |
+| Memory leak | None (stable RSS across all steps) |
+| Checkpoints saved | 10 (every 100 steps) |
+
+Training runs in a single process — no `exec()` restarts, no process boundaries. Consistent ~1.35s/step throughout.
+
+### v2.0 vs v1.0 Comparison
+
+| Metric | v1.0 (Full Recompile) | v2.0 (Delta Reload) | Improvement |
+|--------|----------------------|---------------------|-------------|
+| Avg train time | 908 ms/step | 875 ms/step | ~same |
+| Avg recompile time | 4,200 ms/step | 541 ms/step | **7.8x** |
+| Avg total step time | 5,108 ms/step | 1,416 ms/step | **3.6x** |
+| Recompile % of step | 83.9% | 38.2% | -45.7 pp |
+| 1000-step wall time | ~85 min | 23 min | **3.7x** |
+| Process model | 1 step/process (exec restart) | Single process (no restart) | Eliminated |
+| Compile limit risk | ~119 budget, must restart | N/A (0 compiles during training) | Eliminated |
+
+The 7.8x recompile speedup comes from bypassing `ANECCompile()`. Instead of creating new model descriptors and compiling MIL text (4.2s for 60 weight-bearing kernels), delta reload does unload→file update→reload on existing model objects (~540ms for 60 kernels, or ~9ms/kernel).
+
+---
+
+### v1.0 — Full Recompile (baseline, for reference)
+
+| Metric | Value |
+|--------|-------|
+| Step time (mean ± std) | **908 ± 16 ms** (compute only) |
+| Recompile time | ~4,200 ms/step |
+| Throughput | 0.612 TFLOPS |
 | Compile budget | 72 programs/process → 1 step/process → auto-restart via `exec()` |
 
-### 1000-Step Training Run (lr=3e-4)
+#### v1.0 — 1000-Step Training Run (lr=3e-4, full recompile)
 
 | Metric | Value |
 |--------|-------|
@@ -39,9 +84,9 @@ Three inference modes: CPU-only, ANE prefill + CPU decode (hybrid), and ANE full
 | Minimum loss | 6.19 (step 888) |
 | Final loss | 6.55 |
 | NaN occurrences | **0 / 1,000** |
-| Wall time | ~90 minutes |
+| Wall time | ~85 minutes |
 
-Loss dropped 50% (12.3→6.2) with zero NaN across all 1,000 steps. Each step runs in a separate process via `exec()` restart. Oscillations are from a fixed high learning rate without warmup/decay — the training loop itself is numerically stable.
+Loss dropped 50% (12.3→6.2) with zero NaN across all 1,000 steps. Each step ran in a separate process via `exec()` restart due to the ~119 compile budget.
 
 ### Stability Stress Test (5 chains × 5 steps, lr=1e-5)
 

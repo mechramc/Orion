@@ -8,7 +8,8 @@ No CoreML. No Metal. No GPU. No cloud.
 ┌─────────────────────────────────────────────────────────────┐
 │  Prompt → Tokenizer → ANE Runtime → CPU Sampling → Output  │
 │                                                             │
-│  "The meaning of life is"  →  170+ tok/s on M4 Max         │
+│  170+ tok/s inference  ·  3.6x faster training via delta    │
+│  compile  ·  LoRA hot-swap without recompilation            │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -42,9 +43,9 @@ Apple ships a dedicated Neural Engine (NPU) in every iPhone, iPad, and Mac sold 
 Orion bypasses CoreML entirely. It talks to the ANE through private frameworks (`_ANEClient`, `_ANECompiler`, MIL IR), giving full control over compilation, memory layout, and scheduling. This opens up capabilities Apple never intended:
 
 - **Training on the ANE** — forward and backward passes on hardware Apple restricted to inference
-- **Direct program caching** — avoid recompilation overhead that plagues CoreML
+- **Delta compilation** — reload weights without recompiling, reducing training overhead by 7.8x
+- **LoRA hot-swap** — adapter matrices as IOSurface inputs, zero recompilation on swap
 - **Custom kernel pipelines** — compiler-generated MIL from graph IR with optimization passes
-- **Budget-aware compilation** — track and manage the ~119 compile limit per process
 
 Orion builds on foundational work by [maderix](https://github.com/maderix/ANE) (private API reverse-engineering, hardware characterization) and [ANEgpt](https://github.com/vipuldivyanshu92/ANEgpt) (training kernel structure), extending them into a **production-quality LLM training and inference runtime** with a compiler, stable training (NaN fix), program caching, checkpointing, and benchmark harness.
 
@@ -77,19 +78,19 @@ Orion builds on foundational work by [maderix](https://github.com/maderix/ANE) (
 ### Training
 
 ```bash
-# Start training (1 step per process due to ANE compile budget)
+# Train with delta compilation (no exec() restart needed)
 ./orion train --weights model/blobs/stories110m \
   --dataset data/tinystories.bin \
-  --steps 100 --grad_accum 4 --lr 1e-5
+  --steps 1000 --grad_accum 4 --lr 3e-4
 
 # Resume from checkpoint
 ./orion train --weights model/blobs/stories110m \
   --dataset data/tinystories.bin \
   --steps 100 --grad_accum 4 --lr 1e-5 \
-  --resume checkpoints/step_50.bin
+  --resume checkpoints/ckpt_00500.bin
 ```
 
-Training runs: ANE forward/backward → CPU weight updates → Adam optimizer → checkpoint → `exec()` restart with updated weights. Each process compiles ANE programs once (72 programs per step), then restarts to stay within the ~119 compile budget. Verified stable over **1,000 steps** (loss: 12.3→6.2, 0 NaN) and a **5-chain × 5-step stress test** (25 total steps, 0 NaN, all chains monotonically decreasing).
+Training runs: ANE forward/backward → CPU weight updates → Adam optimizer → delta weight reload (no recompilation). ANE programs are compiled once at startup (72 programs, ~4.5s); subsequent steps reload updated weights in ~540ms instead of recompiling (~4,200ms). Verified stable over **1,000 steps** in 23 minutes (loss: 11.8→converged, 0 NaN, no memory leak).
 
 ### Benchmarking
 
@@ -164,7 +165,7 @@ These abstractions make Orion a **general ANE model runtime** rather than a sing
 
 **Inference**: Tokenize → embed (CPU) → 12 transformer layers on ANE (bucketed prefill or per-token decode) → final layernorm (ANE) → logits projection (CPU, wte is 73MB — too large for ANE SRAM) → sample → repeat.
 
-**Training**: Embed (CPU) → forward layers (ANE, 6 outputs per layer for backward reuse) → loss (CPU) → backward layers (ANE, dx path) → dW accumulation (CPU, GCD async) → Adam (CPU) → recompile ANE programs with updated weights.
+**Training**: Embed (CPU) → forward layers (ANE, 6 outputs per layer for backward reuse) → loss (CPU) → backward layers (ANE, dx path) → dW accumulation (CPU, GCD async) → Adam (CPU) → delta weight reload (unload → update BLOBFILE on disk → reload, ~540ms for 60 kernels).
 
 **Tensor layout**: All ANE I/O uses `fp16 [1, C, 1, S]` on IOSurface-backed memory. CPU↔ANE data transfer transposes between `[seq, d_model]` and `[d_model, seq]`.
 
@@ -206,11 +207,11 @@ Capabilities:
 
 Three workstreams driven by community feedback (r/MachineLearning) and deferred v1 goals:
 
-- **Delta Compilation** — Surgical weight patching in compiled ANE artifacts, bypassing full recompilation. Training currently spends 82% of wall time on compilation (4.2s compile vs 908ms compute). Target: >5x reduction in compile time per step.
-- **LoRA Adapter-as-Input** — Low-Rank Adaptation where adapter matrices A, B are passed as IOSurface inputs. Enables hot-swapping adapters without recompilation.
+- **Delta Compilation** *(complete)* — Bypass ANE recompilation entirely for weight updates. Instead of recompiling 60 programs per step (4,200ms), Orion unloads each program, updates weight files on disk, and reloads (540ms). **7.8x faster recompilation, 3.6x faster total training step.** 1,000-step endurance verified: 23 minutes wall time (vs ~85 min with full recompile), zero NaN, no memory leak.
+- **LoRA Adapter-as-Input** *(core complete)* — Low-Rank Adaptation where adapter matrices A, B are passed as IOSurface inputs. Compiler frontends generate `Y = conv1x1(x, W_base) + alpha * (x @ A) @ B`. Hot-swap verified: different adapters produce different outputs with zero recompiles. 17/17 tests pass. Discovered 3 new ANE constraints during implementation (#12-#14).
 - **SwiftUI Demo App** — Minimal macOS app with live inference, model selection, and real-time ANE metrics.
 
-**Status**: In progress. Branch: `v2.0-dev`. 20 tasks (T149-T168).
+**Status**: 13/20 tasks complete. Delta compilation 7/7, LoRA 6/8 (2 deferred), Demo App 0/5.
 
 ### Stage 3 — Orion Platform *(future)*
 
@@ -236,21 +237,29 @@ orion chat
 
 ## Technical Discoveries
 
-Key findings from building on the ANE. Hardware-level constraints (compile limit, weight baking, conv vs matmul performance) were first documented by [maderix](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615); the MIL IR and memory constraints below were newly discovered during Orion development:
+20 constraints discovered (6 from upstream, 14 newly documented by Orion). Full reference: [`docs/ane_constraints.md`](docs/ane_constraints.md). Hardware-level constraints (compile limit, weight baking, conv vs matmul) were first documented by [maderix](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615); the rest were discovered empirically during Orion development:
 
-- ANE multi-output surfaces are ordered **alphabetically by MIL variable name**, not by return tuple order
-- ANE requires minimum ~49KB IOSurface allocation — `seq_len=1` compiles but fails at eval with status `0x1d`
-- ANE rejects the `concat` MIL op entirely — must use multi-output programs instead
-- Multi-output programs require **all output IOSurfaces to have the same allocation size** — pad to max
+**Compile/eval failures:**
+- ANE rejects the `concat` MIL op — must use multi-output programs
 - `gelu` is not a valid MIL op — decompose to tanh approximation
-- BLOBFILE header is 128 bytes; the MIL offset `uint64(64)` is the chunk header offset, not the data offset
-- ~119 compile limit per process before ANE stops accepting programs — managed via cache + `exec()` restart
-- SDPA causal masks are ignored by the ANE — must decompose attention manually (Q@K^T → mask → softmax → @V)
+- ~119 compile limit per process — managed via delta compilation (no new compiles needed during training)
+- Minimum ~49KB IOSurface allocation — `seq_len=1` compiles but fails at eval
+- Multi-output AND multi-input require **uniform IOSurface allocation sizes** — pad to max
 - Weight dict must be `@{}` (empty dict), not `nil`, for weight-free programs
 - `milText` must be `NSData*` (UTF-8 bytes), not `NSString*`
-- ANE MIL requires named const refs for matmul `transpose_x`/`transpose_y` — inline bool literals (`true`/`false`) are rejected
-- ANE MIL `conv` op does NOT support `bias=` parameter — bias must be a separate `add` op
-- After MIL optimization passes, output variable names must reference live nodes — dead node names in return tuples cause InvalidMILProgram
+
+**Silent wrong data:**
+- Multi-output surfaces ordered **alphabetically by MIL variable name**, not return tuple order
+- Multi-input surfaces also ordered **alphabetically by MIL parameter name**
+- ANE reads flat buffer as **packed shape data** — no stride adjustment for oversized surfaces
+- SDPA causal masks are ignored — must decompose attention manually
+- BLOBFILE offset is `uint64(64)` (chunk header), not 0 or 128
+- Weights baked at compile time — overwriting BLOBFILE on disk doesn't change outputs (must reload)
+
+**Compiler-level:**
+- ANE MIL requires named const refs for matmul `transpose_x`/`transpose_y` — inline `true`/`false` rejected
+- ANE MIL `conv` does NOT support `bias=` — bias must be a separate `add` op
+- Output variable names must reference live nodes — dead names in return tuples cause InvalidMILProgram
 
 ---
 
@@ -261,10 +270,12 @@ Orion builds on two open-source projects that reverse-engineered Apple's ANE:
 | | [maderix/ANE](https://github.com/maderix/ANE) ([Part 1](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine), [Part 2](https://maderix.substack.com/p/inside-the-m4-apple-neural-engine-615)) | [ANEgpt](https://github.com/vipuldivyanshu92/ANEgpt) | **Orion** |
 |---|---|---|---|
 | **What it is** | ANE reverse-engineering + hardware characterization | Training demo | Production LLM runtime |
-| **Key contribution** | Private API discovery, SRAM/TFLOPS benchmarks, 38 TOPS debunk, compile limit, dispatch overhead | Forward+backward on ANE | Compiler, stable training, 11 new constraints, complete system |
+| **Key contribution** | Private API discovery, SRAM/TFLOPS benchmarks, 38 TOPS debunk, compile limit, dispatch overhead | Forward+backward on ANE | Compiler, delta compilation, LoRA, 14 new constraints, complete system |
 | **Language** | C/ObjC | C + Python | Pure ObjC (no Python at runtime) |
 | **Inference** | Benchmarks only | ANE prefill only | ANE full forward (prefill + decode) |
-| **Training** | N/A | Stories110M (NaN on resume) | Stories110M + CLI + checkpoint + stable resume |
+| **Training** | N/A | Stories110M (NaN on resume) | Stories110M + delta compile (7.8x faster) + stable resume |
+| **Weight updates** | N/A | Full recompile | Delta reload (unload→update→reload, no compiler) |
+| **LoRA** | N/A | N/A | IOSurface-input adapters, hot-swap without recompile |
 | **Models** | N/A | 1 | 2 (GPT-2 124M + Stories110M) |
 | **Tokenizer** | N/A | Python-side | Native BPE + SentencePiece in C |
 | **Program cache** | N/A | None | Composite key cache with eviction |
@@ -284,7 +295,7 @@ Orion builds on two open-source projects that reverse-engineered Apple's ANE:
 ```bash
 # Build with Makefile (~50 source files, no Xcode project required)
 make            # Build the orion binary
-make test       # Build and run all 21 test suites
+make test       # Build and run all 23 test suites
 make bench      # Run benchmark suite
 make clean      # Remove all build artifacts
 ```
@@ -302,7 +313,7 @@ python model/convert/hf_to_blobs_llama.py    # → model/blobs/stories110m/
 ## Project Status
 
 **v1.0**: 148/148 tasks complete across 13 phases. Tagged `v1.0`.
-**v2.0**: 20 new tasks (T149-T168) across 3 workstreams. Branch: `v2.0-dev`.
+**v2.0**: 13/20 tasks complete across 3 workstreams. Branch: `v2.0-dev`.
 
 See [STATUS.md](STATUS.md) for the full dashboard and [RESULTS.md](RESULTS.md) for comprehensive benchmarks.
 
@@ -319,6 +330,9 @@ See [STATUS.md](STATUS.md) for the full dashboard and [RESULTS.md](RESULTS.md) f
 | Phase 11: Build & Quality | Complete | Makefile, zero warnings, constraints docs |
 | Phase 12: Orion Compiler | Complete | Graph IR, 5 optimization passes, 13 frontends, MIL codegen |
 | Phase 13: Milgen→Compiler | Complete | All MIL generators replaced by compiler, 21/21 tests pass |
+| Phase 14: Delta Compilation | Complete | 7.8x faster recompile, 3.6x faster training, 1000-step endurance |
+| Phase 15: LoRA | 6/8 | Compiler frontends, adapter loader, hot-swap, 17/17 tests |
+| Phase 16: SwiftUI Demo | Pending | macOS app with live metrics |
 
 ## Acknowledgements
 
