@@ -165,7 +165,7 @@ These abstractions make Orion a **general ANE model runtime** rather than a sing
 
 **Inference**: Tokenize → embed (CPU) → 12 transformer layers on ANE (bucketed prefill or per-token decode) → final layernorm (ANE) → logits projection (CPU, wte is 73MB — too large for ANE SRAM) → sample → repeat.
 
-**Training**: Embed (CPU) → forward layers (ANE, 6 outputs per layer for backward reuse) → loss (CPU) → backward layers (ANE, dx path) → dW accumulation (CPU, GCD async) → Adam (CPU) → delta weight reload (unload → update BLOBFILE on disk → reload, ~540ms for 60 kernels).
+**Training**: Embed (CPU) → forward layers (ANE, 6 outputs per layer for backward reuse) → loss (CPU) → backward layers (ANE, dx path) → dW accumulation (CPU, GCD async) → Adam (CPU) → delta weight reload (unload → update BLOBFILE on disk → reload, ~494ms for 60 kernels).
 
 **Tensor layout**: All ANE I/O uses `fp16 [1, C, 1, S]` on IOSurface-backed memory. CPU↔ANE data transfer transposes between `[seq, d_model]` and `[d_model, seq]`.
 
@@ -203,15 +203,15 @@ Capabilities:
 
 **Status**: Complete. 32/32 compiler tasks + milgen fully replaced. 21/21 tests pass.
 
-### Stage 2.5 — Orion v2.0 *(in progress)*
+### Stage 2.5 — Orion v2.0 *(complete)*
 
 Three workstreams driven by community feedback (r/MachineLearning) and deferred v1 goals:
 
 - **Delta Compilation** *(complete)* — Bypass ANE recompilation entirely for weight updates. Instead of recompiling 60 programs per step (4,200ms), Orion unloads each program, updates weight files on disk, and reloads (494ms). **8.5x faster recompilation, 3.8x faster total training step.** 1,000-step endurance verified: 22 minutes wall time (vs ~85 min with full recompile), zero NaN, no memory leak.
-- **LoRA Adapter-as-Input** *(core complete)* — Low-Rank Adaptation where adapter matrices A, B are passed as IOSurface inputs. Compiler frontends generate `Y = conv1x1(x, W_base) + alpha * (x @ A) @ B`. Hot-swap verified: different adapters produce different outputs with zero recompiles. 17/17 tests pass. Discovered 3 new ANE constraints during implementation (#12-#14).
-- **SwiftUI Demo App** — Minimal macOS app with live inference, model selection, and real-time ANE metrics.
+- **LoRA Adapter-as-Input** *(complete)* — Low-Rank Adaptation where adapter matrices A, B are passed as IOSurface inputs. Compiler frontends generate `Y = conv1x1(x, W_base) + alpha * (x @ A) @ B`. Hot-swap verified: different adapters produce different outputs with zero recompiles. 17/17 tests pass. Discovered 3 new ANE constraints during implementation (#18-#20).
+- **SwiftUI Demo App** — Deferred to Stage 3.
 
-**Status**: 13/20 tasks complete. Delta compilation 7/7, LoRA 6/8 (2 deferred), Demo App 0/5.
+**Status**: 13/20 tasks complete. Delta compilation 7/7, LoRA 6/8 (2 deferred), Demo App deferred. Tagged `v2.0`.
 
 ### Stage 3 — Orion Platform *(future)*
 
@@ -313,7 +313,7 @@ python model/convert/hf_to_blobs_llama.py    # → model/blobs/stories110m/
 ## Project Status
 
 **v1.0**: 148/148 tasks complete across 13 phases. Tagged `v1.0`.
-**v2.0**: 13/20 tasks complete across 3 workstreams. Branch: `v2.0-dev`.
+**v2.0**: 13/20 tasks complete across 3 workstreams. Tagged `v2.0`.
 
 See [STATUS.md](STATUS.md) for the full dashboard and [RESULTS.md](RESULTS.md) for comprehensive benchmarks.
 
