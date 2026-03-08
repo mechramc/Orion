@@ -6,7 +6,7 @@ No CoreML. No Metal. No GPU. No cloud.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Prompt → Tokenizer → ANE Runtime → CPU Sampling → Output  │
+│  Prompt → Tokenizer → ANE Runtime → CPU Sampling → Output   │
 │                                                             │
 │  170+ tok/s inference  ·  3.8x faster training via delta    │
 │  compile  ·  LoRA hot-swap without recompilation            │
