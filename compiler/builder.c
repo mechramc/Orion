@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <stdlib.h>
 
 // Helper: create a node with basic fields
 static OrionNode make_node(OrionOp op, const char* name, OrionDtype dtype, int shape[4]) {
@@ -15,6 +16,11 @@ static OrionNode make_node(OrionOp op, const char* name, OrionDtype dtype, int s
     if (name) snprintf(n.name, ORION_MAX_NAME, "%s", name);
     if (shape) memcpy(n.shape, shape, 4 * sizeof(int));
     return n;
+}
+
+static bool orion_use_fp32_rrms_powchain(void) {
+    const char *mode = getenv("ORION_RMSNORM_RRMS_MODE");
+    return mode && (strcmp(mode, "nr1") == 0 || strcmp(mode, "fp32") == 0);
 }
 
 int orion_gb_input(OrionGraph* g, const char* name, OrionDtype dtype, int shape[4]) {
@@ -335,8 +341,24 @@ int orion_gb_gelu(OrionGraph* g, int input, const char* prefix, int dim __attrib
 int orion_gb_silu(OrionGraph* g, int input, const char* prefix, int dim __attribute__((unused)), int seq __attribute__((unused))) {
     char buf[ORION_MAX_NAME];
 
+    // Use sigmoid(x) = 0.5 * (tanh(0.5 * x) + 1) to avoid the ANE builtin sigmoid drift.
+    snprintf(buf, sizeof(buf), "%s_half", prefix);
+    int half = orion_gb_const_scalar(g, buf, ORION_DTYPE_FP16, 0.5f);
+
+    snprintf(buf, sizeof(buf), "%s_hx", prefix);
+    int hx = orion_gb_mul(g, input, half, buf);
+
+    snprintf(buf, sizeof(buf), "%s_th", prefix);
+    int th = orion_gb_tanh(g, hx, buf);
+
+    snprintf(buf, sizeof(buf), "%s_one", prefix);
+    int one = orion_gb_const_scalar(g, buf, ORION_DTYPE_FP16, 1.0f);
+
+    snprintf(buf, sizeof(buf), "%s_onep", prefix);
+    int onep = orion_gb_add(g, th, one, buf);
+
     snprintf(buf, sizeof(buf), "%s_sig", prefix);
-    int sig = orion_gb_sigmoid(g, input, buf);
+    int sig = orion_gb_mul(g, onep, half, buf);
 
     snprintf(buf, sizeof(buf), "%s_out", prefix);
     int out = orion_gb_mul(g, input, sig, buf);
@@ -366,6 +388,7 @@ int orion_gb_rmsnorm(OrionGraph* g, int input, int weight, float eps,
     // / dim
     float inv_dim = 1.0f / (float)dim;
     snprintf(buf, sizeof(buf), "%s_invd", prefix);
+    snprintf(buf, sizeof(buf), "%s_invd", prefix);
     int invd = orion_gb_const_scalar(g, buf, ORION_DTYPE_FP16, inv_dim);
     snprintf(buf, sizeof(buf), "%s_ms", prefix);
     int ms = orion_gb_mul(g, ss, invd, buf);
@@ -382,9 +405,29 @@ int orion_gb_rmsnorm(OrionGraph* g, int input, int weight, float eps,
     snprintf(buf, sizeof(buf), "%s_rrms", prefix);
     int rrms = orion_gb_pow(g, mse, nhalf, buf);
 
-    // x * rrms
-    snprintf(buf, sizeof(buf), "%s_xr", prefix);
-    int xr = orion_gb_mul(g, input, rrms, buf);
+    int xr = -1;
+    if (orion_use_fp32_rrms_powchain()) {
+        snprintf(buf, sizeof(buf), "%s_rrms_sq", prefix);
+        int rrms_sq = orion_gb_mul(g, rrms, rrms, buf);
+        snprintf(buf, sizeof(buf), "%s_nr_term", prefix);
+        int nr_term = orion_gb_mul(g, mse, rrms_sq, buf);
+        snprintf(buf, sizeof(buf), "%s_half_nr", prefix);
+        int half_nr = orion_gb_const_scalar(g, buf, ORION_DTYPE_FP16, 0.5f);
+        snprintf(buf, sizeof(buf), "%s_nr_half", prefix);
+        int nr_half = orion_gb_mul(g, nr_term, half_nr, buf);
+        snprintf(buf, sizeof(buf), "%s_threehalves", prefix);
+        int threehalves = orion_gb_const_scalar(g, buf, ORION_DTYPE_FP16, 1.5f);
+        snprintf(buf, sizeof(buf), "%s_nr_corr", prefix);
+        int nr_corr = orion_gb_sub(g, threehalves, nr_half, buf);
+        snprintf(buf, sizeof(buf), "%s_rrms_refined", prefix);
+        int rrms_refined = orion_gb_mul(g, rrms, nr_corr, buf);
+        snprintf(buf, sizeof(buf), "%s_xr", prefix);
+        xr = orion_gb_mul(g, input, rrms_refined, buf);
+    } else {
+        // x * rrms
+        snprintf(buf, sizeof(buf), "%s_xr", prefix);
+        xr = orion_gb_mul(g, input, rrms, buf);
+    }
 
     // weight * normalized
     snprintf(buf, sizeof(buf), "%s_out", prefix);
