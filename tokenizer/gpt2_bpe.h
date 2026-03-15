@@ -13,6 +13,13 @@ typedef struct OrionGPT2Tokenizer OrionGPT2Tokenizer;
 OrionGPT2Tokenizer* orion_gpt2_tokenizer_load(const char* vocab_path,
                                                 const char* merges_path);
 
+/// Load a ByteLevel BPE tokenizer with an explicit pre-tokenization regex.
+/// This is used for non-GPT2 models such as Qwen that keep GPT2-style BPE
+/// merges but alter the split regex.
+OrionGPT2Tokenizer* orion_gpt2_tokenizer_load_with_regex(const char* vocab_path,
+                                                         const char* merges_path,
+                                                         const char* regex_pattern);
+
 /// Encode text to token ids.
 /// @param tok      Tokenizer handle
 /// @param text     Input text (UTF-8)
