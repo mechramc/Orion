@@ -59,6 +59,14 @@ Measured on M4 MacBook Air 8GB, macOS 26.5.2. Each burst run = 10 iterations; su
 - **Orion stays thermally stable on battery** (Nominal across all sustained runs), only reaching Moderate on AC sustained — significantly better than MLX's Heavy throttling.
 - **Battery cuts MLX throughput by ~50%** (52.6→26.2 tok/s for llama-3.2-3b), while ANE is more graceful (~31% drop: 110.1→75.8 tok/s).
 
+### Visualizations
+
+#### Power Efficiency
+![Power Efficiency](results/power_efficiency.png)
+
+#### Thermal Degradation
+![Thermal Degradation](results/thermal_degradation.png)
+
 ## Contributing
 
 This is a collaborative project with the Orion team. Benchmark scripts and raw data will be contributed back to the Orion repository via pull request.
