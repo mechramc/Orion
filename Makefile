@@ -29,11 +29,14 @@ INFERENCE_SRC = \
 	kernels/inference/prefill_ane.m \
 	kernels/inference/decode_ane.m \
 	kernels/inference/decode_cpu.m \
-	kernels/inference/kv_cache.m
+	kernels/inference/kv_cache.m \
+	kernels/inference/qwen_cpu_ops.m
 
 TRAINING_SRC = \
 	kernels/training/stories_train.m \
 	kernels/training/stories_cpu_ops.m \
+	kernels/training/qwen_lora_cpu_ops.m \
+	kernels/training/qwen_lora_train.m \
 	kernels/training/data_loader.m
 
 MODEL_SRC = model/weight_loader.m
@@ -65,6 +68,7 @@ COMPILER_C_SRC = \
 	compiler/frontends/gpt2_prefill.c \
 	compiler/frontends/gpt2_decode.c \
 	compiler/frontends/gpt2_final.c \
+	compiler/frontends/qwen35_prefill.c \
 	compiler/frontends/classifier_softmax.c \
 	compiler/frontends/stories_train.c \
 	compiler/frontends/lora.c

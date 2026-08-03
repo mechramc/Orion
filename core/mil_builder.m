@@ -1,5 +1,7 @@
 #import "mil_builder.h"
 #import <math.h>
+#include <stdlib.h>
+#include <string.h>
 
 // T019: orion_mil_linear (conv-based)
 // T020: orion_mil_layernorm, orion_mil_rmsnorm
@@ -16,6 +18,11 @@
     "        tensor<int32, [4]> %s_pd = const()[name=string(\"%s_pd\"), val=tensor<int32, [4]>([0,0,0,0])];\n" \
     "        tensor<int32, [2]> %s_dl = const()[name=string(\"%s_dl\"), val=tensor<int32, [2]>([1,1])];\n" \
     "        int32 %s_gr = const()[name=string(\"%s_gr\"), val=int32(1)];\n"
+
+static BOOL orion_mil_use_fp32_rrms_powchain(void) {
+    const char *mode = getenv("ORION_RMSNORM_RRMS_MODE");
+    return mode && (strcmp(mode, "nr1") == 0 || strcmp(mode, "fp32") == 0);
+}
 
 #pragma mark - T023: Header + Program Wrapper
 
@@ -176,21 +183,47 @@ NSString* orion_mil_rmsnorm(const char* prefix, const char* input,
     [m appendFormat:@"        bool %@_kd = const()[name=string(\"%@_kd\"), val=bool(true)];\n", p, p];
     [m appendFormat:@"        tensor<fp16, [1,1,1,%d]> %@_ss = reduce_sum(x=%@_sq, axes=%@_ax, keep_dims=%@_kd)[name=string(\"%@_ss\")];\n",
      seq, p, p, p, p, p];
-    [m appendFormat:@"        fp16 %@_invd = const()[name=string(\"%@_invd\"), val=fp16(%f)];\n", p, p, inv_dim];
-    [m appendFormat:@"        tensor<fp16, [1,1,1,%d]> %@_ms = mul(x=%@_ss, y=%@_invd)[name=string(\"%@_ms\")];\n",
-     seq, p, p, p, p];
+    if (orion_mil_use_fp32_rrms_powchain()) {
+        [m appendFormat:@"        fp16 %@_invd = const()[name=string(\"%@_invd\"), val=fp16(%f)];\n", p, p, inv_dim];
+        [m appendFormat:@"        tensor<fp16, [1,1,1,%d]> %@_ms = mul(x=%@_ss, y=%@_invd)[name=string(\"%@_ms\")];\n",
+         seq, p, p, p, p];
+        [m appendFormat:@"        fp16 %@_eps = const()[name=string(\"%@_eps\"), val=fp16(%f)];\n", p, p, eps];
+        [m appendFormat:@"        tensor<fp16, [1,1,1,%d]> %@_mse = add(x=%@_ms, y=%@_eps)[name=string(\"%@_mse\")];\n",
+         seq, p, p, p, p];
+        [m appendFormat:@"        fp16 %@_nhalf = const()[name=string(\"%@_nhalf\"), val=fp16(-0.5)];\n", p, p];
+        [m appendFormat:@"        tensor<fp16, [1,1,1,%d]> %@_rrms = pow(x=%@_mse, y=%@_nhalf)[name=string(\"%@_rrms\")];\n",
+         seq, p, p, p, p];
+        [m appendFormat:@"        tensor<fp16, [1,1,1,%d]> %@_rrms_sq = mul(x=%@_rrms, y=%@_rrms)[name=string(\"%@_rrms_sq\")];\n",
+         seq, p, p, p, p];
+        [m appendFormat:@"        tensor<fp16, [1,1,1,%d]> %@_nr_term = mul(x=%@_mse, y=%@_rrms_sq)[name=string(\"%@_nr_term\")];\n",
+         seq, p, p, p, p];
+        [m appendFormat:@"        fp16 %@_half_nr = const()[name=string(\"%@_half_nr\"), val=fp16(0.5)];\n", p, p];
+        [m appendFormat:@"        tensor<fp16, [1,1,1,%d]> %@_nr_half = mul(x=%@_nr_term, y=%@_half_nr)[name=string(\"%@_nr_half\")];\n",
+         seq, p, p, p, p];
+        [m appendFormat:@"        fp16 %@_threehalves = const()[name=string(\"%@_threehalves\"), val=fp16(1.5)];\n", p, p];
+        [m appendFormat:@"        tensor<fp16, [1,1,1,%d]> %@_nr_corr = sub(x=%@_threehalves, y=%@_nr_half)[name=string(\"%@_nr_corr\")];\n",
+         seq, p, p, p, p];
+        [m appendFormat:@"        tensor<fp16, [1,1,1,%d]> %@_rrms_refined = mul(x=%@_rrms, y=%@_nr_corr)[name=string(\"%@_rrms_refined\")];\n",
+         seq, p, p, p, p];
+        [m appendFormat:@"        tensor<fp16, [1,%d,1,%d]> %@_xr = mul(x=%@, y=%@_rrms_refined)[name=string(\"%@_xr\")];\n",
+         dim, seq, p, inp, p, p];
+    } else {
+        [m appendFormat:@"        fp16 %@_invd = const()[name=string(\"%@_invd\"), val=fp16(%f)];\n", p, p, inv_dim];
+        [m appendFormat:@"        tensor<fp16, [1,1,1,%d]> %@_ms = mul(x=%@_ss, y=%@_invd)[name=string(\"%@_ms\")];\n",
+         seq, p, p, p, p];
 
-    // rsqrt(ms + eps)
-    [m appendFormat:@"        fp16 %@_eps = const()[name=string(\"%@_eps\"), val=fp16(%f)];\n", p, p, eps];
-    [m appendFormat:@"        tensor<fp16, [1,1,1,%d]> %@_mse = add(x=%@_ms, y=%@_eps)[name=string(\"%@_mse\")];\n",
-     seq, p, p, p, p];
-    [m appendFormat:@"        fp16 %@_nhalf = const()[name=string(\"%@_nhalf\"), val=fp16(-0.5)];\n", p, p];
-    [m appendFormat:@"        tensor<fp16, [1,1,1,%d]> %@_rrms = pow(x=%@_mse, y=%@_nhalf)[name=string(\"%@_rrms\")];\n",
-     seq, p, p, p, p];
+        // rsqrt(ms + eps)
+        [m appendFormat:@"        fp16 %@_eps = const()[name=string(\"%@_eps\"), val=fp16(%f)];\n", p, p, eps];
+        [m appendFormat:@"        tensor<fp16, [1,1,1,%d]> %@_mse = add(x=%@_ms, y=%@_eps)[name=string(\"%@_mse\")];\n",
+         seq, p, p, p, p];
+        [m appendFormat:@"        fp16 %@_nhalf = const()[name=string(\"%@_nhalf\"), val=fp16(-0.5)];\n", p, p];
+        [m appendFormat:@"        tensor<fp16, [1,1,1,%d]> %@_rrms = pow(x=%@_mse, y=%@_nhalf)[name=string(\"%@_rrms\")];\n",
+         seq, p, p, p, p];
 
-    // x * rrms
-    [m appendFormat:@"        tensor<fp16, [1,%d,1,%d]> %@_xr = mul(x=%@, y=%@_rrms)[name=string(\"%@_xr\")];\n",
-     dim, seq, p, inp, p, p];
+        // x * rrms
+        [m appendFormat:@"        tensor<fp16, [1,%d,1,%d]> %@_xr = mul(x=%@, y=%@_rrms)[name=string(\"%@_xr\")];\n",
+         dim, seq, p, inp, p, p];
+    }
 
     // weight * normalized
     [m appendFormat:@"        tensor<fp16, [1,%d,1,1]> %@_w = const()[name=string(\"%@_w\"), "
@@ -260,9 +293,17 @@ NSString* orion_mil_silu(const char* prefix, const char* input, int dim, int seq
     NSString *inp = @(input);
     NSMutableString *m = [NSMutableString string];
 
-    // SiLU(x) = x * sigmoid(x)
-    [m appendFormat:@"        tensor<fp16, [1,%d,1,%d]> %@_sig = sigmoid(x=%@)[name=string(\"%@_sig\")];\n",
-     dim, seq, p, inp, p];
+    // SiLU(x) = x * sigmoid(x), using sigmoid(x) = 0.5 * (tanh(0.5 * x) + 1)
+    [m appendFormat:@"        fp16 %@_half = const()[name=string(\"%@_half\"), val=fp16(0.5)];\n", p, p];
+    [m appendFormat:@"        tensor<fp16, [1,%d,1,%d]> %@_hx = mul(x=%@, y=%@_half)[name=string(\"%@_hx\")];\n",
+     dim, seq, p, inp, p, p];
+    [m appendFormat:@"        tensor<fp16, [1,%d,1,%d]> %@_th = tanh(x=%@_hx)[name=string(\"%@_th\")];\n",
+     dim, seq, p, p, p];
+    [m appendFormat:@"        fp16 %@_one = const()[name=string(\"%@_one\"), val=fp16(1.0)];\n", p, p];
+    [m appendFormat:@"        tensor<fp16, [1,%d,1,%d]> %@_onep = add(x=%@_th, y=%@_one)[name=string(\"%@_onep\")];\n",
+     dim, seq, p, p, p, p];
+    [m appendFormat:@"        tensor<fp16, [1,%d,1,%d]> %@_sig = mul(x=%@_onep, y=%@_half)[name=string(\"%@_sig\")];\n",
+     dim, seq, p, p, p, p];
     [m appendFormat:@"        tensor<fp16, [1,%d,1,%d]> %@_out = mul(x=%@, y=%@_sig)[name=string(\"%@_out\")];\n",
      dim, seq, p, inp, p, p];
 

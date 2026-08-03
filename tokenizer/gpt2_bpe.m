@@ -62,6 +62,7 @@ struct OrionGPT2Tokenizer {
     unichar byte_to_unicode[256];
     uint8_t unicode_to_byte[512];
     void* bpe_cache;   // NSMutableDictionary<NSString*, NSString*>*
+    void* pretokenize_pattern; // NSString*
 };
 
 // Accessors for type safety
@@ -69,6 +70,7 @@ struct OrionGPT2Tokenizer {
 #define TOK_DECODER(tok)   ((__bridge NSMutableArray<NSString*>*)(tok)->decoder)
 #define TOK_BPE_RANKS(tok) ((__bridge NSMutableDictionary<NSString*, NSNumber*>*)(tok)->bpe_ranks)
 #define TOK_BPE_CACHE(tok) ((__bridge NSMutableDictionary<NSString*, NSString*>*)(tok)->bpe_cache)
+#define TOK_PRETOKENIZE_PATTERN(tok) ((__bridge NSString*)(tok)->pretokenize_pattern)
 
 #pragma mark - JSON Parsing (vocab.json)
 
@@ -88,10 +90,15 @@ static bool load_vocab(OrionGPT2Tokenizer* tok, const char* path) {
     }
 
     NSMutableDictionary* enc = [NSMutableDictionary dictionaryWithCapacity:vocab.count];
-    NSMutableArray* dec = [NSMutableArray arrayWithCapacity:vocab.count];
+    int max_id = -1;
+    for (NSString* key in vocab) {
+        NSNumber* val = vocab[key];
+        if (val.intValue > max_id) max_id = val.intValue;
+    }
+    NSMutableArray* dec = [NSMutableArray arrayWithCapacity:max_id + 1];
 
     // Pre-fill decoder with empty strings
-    for (int i = 0; i < (int)vocab.count; i++) {
+    for (int i = 0; i <= max_id; i++) {
         [dec addObject:@""];
     }
 
@@ -106,7 +113,7 @@ static bool load_vocab(OrionGPT2Tokenizer* tok, const char* path) {
 
     tok->encoder = (void*)CFBridgingRetain(enc);
     tok->decoder = (void*)CFBridgingRetain(dec);
-    tok->vocab_size = (int)vocab.count;
+    tok->vocab_size = max_id + 1;
     return true;
 }
 
@@ -148,19 +155,11 @@ static bool load_merges(OrionGPT2Tokenizer* tok, const char* path) {
 // GPT-2 pre-tokenization pattern:
 // 's|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+
 // We implement this with NSRegularExpression.
-static NSArray<NSString*>* pre_tokenize(NSString* text) {
-    static NSRegularExpression* regex = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        NSString* pattern = @"'s|'t|'re|'ve|'m|'ll|'d"
-                            @"| ?\\p{L}+"
-                            @"| ?\\p{N}+"
-                            @"| ?[^\\s\\p{L}\\p{N}]+"
-                            @"|\\s+(?!\\S)"
-                            @"|\\s+";
-        regex = [NSRegularExpression regularExpressionWithPattern:pattern
-                                                         options:0 error:nil];
-    });
+static NSArray<NSString*>* pre_tokenize(OrionGPT2Tokenizer* tok, NSString* text) {
+    NSRegularExpression* regex =
+        [NSRegularExpression regularExpressionWithPattern:TOK_PRETOKENIZE_PATTERN(tok)
+                                                 options:0 error:nil];
+    if (!regex) return @[];
 
     NSMutableArray<NSString*>* tokens = [NSMutableArray array];
     NSArray<NSTextCheckingResult*>* matches =
@@ -263,8 +262,9 @@ static NSString* bpe(OrionGPT2Tokenizer* tok, NSString* token) {
 
 #pragma mark - Public API
 
-OrionGPT2Tokenizer* orion_gpt2_tokenizer_load(const char* vocab_path,
-                                                const char* merges_path) {
+OrionGPT2Tokenizer* orion_gpt2_tokenizer_load_with_regex(const char* vocab_path,
+                                                         const char* merges_path,
+                                                         const char* regex_pattern) {
     OrionGPT2Tokenizer* tok = calloc(1, sizeof(OrionGPT2Tokenizer));
 
     build_byte_to_unicode(tok->byte_to_unicode);
@@ -281,17 +281,39 @@ OrionGPT2Tokenizer* orion_gpt2_tokenizer_load(const char* vocab_path,
     }
 
     tok->bpe_cache = (void*)CFBridgingRetain([NSMutableDictionary dictionaryWithCapacity:10000]);
+    NSString* pattern = regex_pattern
+        ? [NSString stringWithUTF8String:regex_pattern]
+        : @"'s|'t|'re|'ve|'m|'ll|'d"
+          @"| ?\\p{L}+"
+          @"| ?\\p{N}+"
+          @"| ?[^\\s\\p{L}\\p{N}]+"
+          @"|\\s+(?!\\S)"
+          @"|\\s+";
+    tok->pretokenize_pattern = (void*)CFBridgingRetain(pattern);
 
     fprintf(stderr, "tokenizer: loaded %d vocab, %d merges\n",
             tok->vocab_size, tok->num_merges);
     return tok;
 }
 
+OrionGPT2Tokenizer* orion_gpt2_tokenizer_load(const char* vocab_path,
+                                              const char* merges_path) {
+    return orion_gpt2_tokenizer_load_with_regex(vocab_path, merges_path, NULL);
+}
+
 int orion_gpt2_encode(OrionGPT2Tokenizer* tok, const char* text,
                       int* tokens, int max_tokens) {
     {
         NSString* nsText = [NSString stringWithUTF8String:text];
-        NSArray<NSString*>* pre_tokens = pre_tokenize(nsText);
+
+        // Honor exact added-token/special-token matches before pre-tokenization.
+        NSNumber* direct_id = TOK_ENCODER(tok)[nsText];
+        if (direct_id && max_tokens > 0) {
+            tokens[0] = direct_id.intValue;
+            return 1;
+        }
+
+        NSArray<NSString*>* pre_tokens = pre_tokenize(tok, nsText);
 
         int count = 0;
         for (NSString* chunk in pre_tokens) {
@@ -349,5 +371,6 @@ void orion_gpt2_tokenizer_free(OrionGPT2Tokenizer* tok) {
     if (tok->decoder)   CFRelease(tok->decoder);
     if (tok->bpe_ranks) CFRelease(tok->bpe_ranks);
     if (tok->bpe_cache) CFRelease(tok->bpe_cache);
+    if (tok->pretokenize_pattern) CFRelease(tok->pretokenize_pattern);
     free(tok);
 }

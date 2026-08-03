@@ -62,6 +62,9 @@ data/
 
 # Tokenizer data files (small, needed for inference)
 !tokenizer/data/
+tokenizer/data/orion_*/
+tokenizer/data/*_tok/
+tokenizer/hf_*/
 
 # Experiments (binaries only, source tracked)
 experiments/*.o

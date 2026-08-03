@@ -121,6 +121,13 @@ int orion_cmd_infer(int argc, const char* argv[]) {
     double t_load = time_ms() - t0;
     fprintf(stderr, "Weights loaded in %.1f ms\n", t_load);
 
+    OrionModelConfig cfg = kGPT2_124M;
+    cfg.n_layer = w->n_layer;
+    cfg.d_model = w->d_model;
+    cfg.hidden_dim = w->d_ff;
+    cfg.vocab = w->vocab;
+    cfg.max_seq = w->max_seq;
+
     // Tokenize prompt
     int prompt_tokens[1024];
     int prompt_len = orion_gpt2_encode(tok, prompt, prompt_tokens, 1024);
@@ -134,7 +141,7 @@ int orion_cmd_infer(int argc, const char* argv[]) {
 
     // Allocate
     float* logits = (float*)malloc(w->vocab * sizeof(float));
-    OrionKVCache* kv = orion_kv_cache_create(&kGPT2_124M);
+    OrionKVCache* kv = orion_kv_cache_create(&cfg);
     int gen_count = 0;
 
     // Start profiler
@@ -148,12 +155,12 @@ int orion_cmd_infer(int argc, const char* argv[]) {
     bool prefill_ok;
     if (use_ane) {
         prefill_ok = orion_ane_prefill(w, prompt_tokens, prompt_len,
-                                        &kGPT2_124M, weights_path, kv, logits);
+                                        &cfg, weights_path, kv, logits);
         if (!prefill_ok) {
             fprintf(stderr, "Warning: ANE prefill failed, falling back to CPU\n");
             // Reset KV cache
             orion_kv_cache_free(kv);
-            kv = orion_kv_cache_create(&kGPT2_124M);
+            kv = orion_kv_cache_create(&cfg);
             orion_gpt2_prefill_kv(w, prompt_tokens, prompt_len, kv, logits);
             prefill_ok = true;
         }

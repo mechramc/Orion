@@ -16,6 +16,7 @@ static const OrionModelConfig kStories110M = {
     .hidden_dim = 2048,  // SwiGLU hidden size
     .vocab      = 32000, // Llama2 BPE vocabulary
     .max_seq    = 256,
+    .n_kv_head  = 12,
 };
 
 // Training constants (from ANEgpt)

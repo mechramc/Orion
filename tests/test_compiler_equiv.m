@@ -142,7 +142,7 @@ static bool test_stories_fwd_ffn(void) {
     NSString* mil = orion_codegen_mil(g, "main");
     orion_graph_free(g);
 
-    return mil != nil && [mil containsString:@"sigmoid("]; // SiLU decomposition
+    return mil != nil && [mil containsString:@"tanh("] && [mil containsString:@"_sig"];
 }
 
 // Test: Stories ffnBwd generates valid MIL
