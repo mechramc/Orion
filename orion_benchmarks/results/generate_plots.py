@@ -85,7 +85,7 @@ def plot_thermal_degradation(df, output_file="thermal_degradation.png"):
     ax.bar(x[:len(sustained_vals)] + width/2, sustained_vals, width, label="Sustained (5 min)", edgecolor="black")
 
     ax.set_ylabel("Throughput (tokens/sec)", fontsize=12)
-    ax.set_title("Apple M1 Air (Fanless): Burst vs Sustained Throughput (AC Power)", fontsize=14)
+    ax.set_title("Apple M4 Air (Fanless): Burst vs Sustained Throughput (AC Power)", fontsize=14)
     ax.set_xticks(x[:len(burst_vals)])
     ax.set_xticklabels(["Llama-3.2-3B\n(MLX)", "Phi-3-Mini\n(MLX)", "GPT-2-124M\n(Orion/ANE)"][:len(burst_vals)])
     ax.legend()
@@ -112,6 +112,7 @@ def plot_power_efficiency(df, output_file="power_efficiency.png"):
     colors = {"AC": "C0", "Battery": "C1"}
     markers = {"Burst": "o", "Sustained": "X"}
 
+    texts = []
     for power in df["Power"].unique():
         for mode in df["Mode"].unique():
             subset = df[(df["Power"] == power) & (df["Mode"] == mode)]
@@ -129,17 +130,26 @@ def plot_power_efficiency(df, output_file="power_efficiency.png"):
             )
 
             for _, row in subset.iterrows():
-                ax.annotate(
+                texts.append(ax.text(
+                    row["Throughput (tok/s)"], 
+                    row["Energy (J/run)"],
                     f"{row['Model']}\n{row['Backend']}",
-                    (row["Throughput (tok/s)"], row["Energy (J/run)"]),
-                    textcoords="offset points",
-                    xytext=(10, 5),
                     fontsize=8,
-                )
+                ))
+
+    try:
+        from adjustText import adjust_text
+        adjust_text(texts, arrowprops=dict(arrowstyle="-", color='gray', lw=0.5))
+    except ImportError:
+        print("Note: 'adjustText' library not found. Labels might overlap. Run 'pip install adjustText' to fix.")
+        # Fallback simple stagger
+        for i, t in enumerate(texts):
+            offset = 10 if i % 2 == 0 else -20
+            t.set_position((t.get_position()[0], t.get_position()[1] + offset))
 
     ax.set_xlabel("Throughput (tokens/sec)", fontsize=12)
     ax.set_ylabel("Energy per Run (Joules)", fontsize=12)
-    ax.set_title("Performance vs. Energy Tradeoff on M1 Air", fontsize=14)
+    ax.set_title("Performance vs. Energy Tradeoff on M4 Air", fontsize=14)
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.7)
 
