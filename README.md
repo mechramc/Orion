@@ -6,7 +6,7 @@ No CoreML. No Metal. No GPU. No cloud.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Prompt → Tokenizer → ANE Runtime → CPU Sampling → Output  │
+│  Prompt → Tokenizer → ANE Runtime → CPU Sampling → Output   │
 │                                                             │
 │  170+ tok/s inference  ·  3.8x faster training via delta    │
 │  compile  ·  LoRA hot-swap without recompilation            │
@@ -118,36 +118,36 @@ This turns Orion into a **measurement tool** for ANE performance, not just an in
 ```
                          orion CLI
                 ┌──────────────────────────┐
-                │   infer   train   bench   │
+                │   infer   train   bench  │
                 └─────┬───────┬───────┬────┘
                       │       │       │
            ┌──────────┴───────┴───────┴──────────┐
-           │          Model Layer                  │
-           │  OrionModelConfig (GPT-2, Stories)    │
-           │  Tokenizers (BPE, SentencePiece)      │
-           │  Weight loading (BLOBFILE format)      │
-           └──────────────┬───────────────────────┘
+           │          Model Layer                │
+           │  OrionModelConfig (GPT-2, Stories)  │
+           │  Tokenizers (BPE, SentencePiece)    │
+           │  Weight loading (BLOBFILE format)   │
+           └──────────────┬──────────────────────┘
                           │
-           ┌──────────────┴───────────────────────┐
-           │          Compiler + Kernel Layer         │
-           │  Graph IR → optimized MIL text           │
-           │  Weight dict builders → BLOBFILE refs    │
-           │  Program cache (store/lookup/evict)      │
-           └──────────────┬───────────────────────┘
+           ┌──────────────┴────────────────────────┐
+           │          Compiler + Kernel Layer      │
+           │  Graph IR → optimized MIL text        │
+           │  Weight dict builders → BLOBFILE refs │
+           │  Program cache (store/lookup/evict)   │
+           └──────────────┬────────────────────────┘
                           │
-           ┌──────────────┴───────────────────────┐
-           │          Core Runtime                  │
-           │  orion_compile_mil → OrionProgram      │
-           │  orion_eval (IOSurface I/O)            │
-           │  Delta reload (unload→patch→reload)    │
-           └──────────────┬───────────────────────┘
+           ┌──────────────┴────────────────────────┐
+           │          Core Runtime                 │
+           │  orion_compile_mil → OrionProgram     │
+           │  orion_eval (IOSurface I/O)           │
+           │  Delta reload (unload→patch→reload)   │
+           └──────────────┬────────────────────────┘
                           │
-           ┌──────────────┴───────────────────────┐
-           │    Apple Neural Engine (private APIs)  │
-           │  _ANEClient → _ANECompiler             │
-           │  MIL IR → ANE microcode                │
-           │  IOSurface-backed fp16 [1,C,1,S]       │
-           └────────────────────────────────────────┘
+           ┌──────────────┴────────────────────────┐
+           │    Apple Neural Engine (private APIs) │
+           │  _ANEClient → _ANECompiler            │
+           │  MIL IR → ANE microcode               │
+           │  IOSurface-backed fp16 [1,C,1,S]      │
+           └───────────────────────────────────────┘
 ```
 
 ### Abstraction layers
