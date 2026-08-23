@@ -15,6 +15,7 @@ static const OrionModelConfig kGPT2_124M = {
     .hidden_dim = 3072, // 4 * 768
     .vocab     = 50257,
     .max_seq   = 1024,
+    .n_kv_head = 12,
 };
 
 // Inference bucket sizes for ANE prefill

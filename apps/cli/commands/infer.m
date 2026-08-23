@@ -17,11 +17,19 @@
 // T054: Wire hybrid inference (ANE prefill → CPU decode)
 // T102: ANE full forward (ANE prefill → ANE decode)
 //
+// This command currently exposes the GPT-2 runtime only. Orion-Q Qwen code in
+// this PR is porting/diagnostic scaffolding and is exercised through its test
+// harnesses; end-to-end Qwen CLI dispatch is intentionally not claimed here.
+//
 // Usage: orion infer --prompt "Hello, world" --max_tokens 64 [--ane]
 
 static void print_infer_help(void) {
     fprintf(stderr,
         "Usage: orion infer [options]\n"
+        "\n"
+        "Model support:\n"
+        "  This command currently supports GPT-2 only.\n"
+        "  Orion-Q Qwen paths are diagnostic/test harnesses in this PR.\n"
         "\n"
         "Options:\n"
         "  --prompt TEXT          Input prompt (required)\n"
@@ -31,10 +39,10 @@ static void print_infer_help(void) {
         "  --seed N               RNG seed (default: 42)\n"
         "  --ane                  Use ANE for prefill + decode (default: CPU only)\n"
         "  --ane-prefill          Use ANE for prefill only, CPU decode (v2 mode)\n"
-        "  --weights PATH         Path to weight blobs directory\n"
+        "  --weights PATH         Path to GPT-2 weight blobs directory\n"
         "                         (default: model/blobs/gpt2_124m)\n"
-        "  --vocab PATH           Path to vocab.json (default: tokenizer/data/vocab.json)\n"
-        "  --merges PATH          Path to merges.txt (default: tokenizer/data/merges.txt)\n"
+        "  --vocab PATH           Path to GPT-2 vocab.json (default: tokenizer/data/vocab.json)\n"
+        "  --merges PATH          Path to GPT-2 merges.txt (default: tokenizer/data/merges.txt)\n"
         "  --help                 Show this help message\n"
     );
 }
@@ -121,6 +129,13 @@ int orion_cmd_infer(int argc, const char* argv[]) {
     double t_load = time_ms() - t0;
     fprintf(stderr, "Weights loaded in %.1f ms\n", t_load);
 
+    OrionModelConfig cfg = kGPT2_124M;
+    cfg.n_layer = w->n_layer;
+    cfg.d_model = w->d_model;
+    cfg.hidden_dim = w->d_ff;
+    cfg.vocab = w->vocab;
+    cfg.max_seq = w->max_seq;
+
     // Tokenize prompt
     int prompt_tokens[1024];
     int prompt_len = orion_gpt2_encode(tok, prompt, prompt_tokens, 1024);
@@ -134,7 +149,7 @@ int orion_cmd_infer(int argc, const char* argv[]) {
 
     // Allocate
     float* logits = (float*)malloc(w->vocab * sizeof(float));
-    OrionKVCache* kv = orion_kv_cache_create(&kGPT2_124M);
+    OrionKVCache* kv = orion_kv_cache_create(&cfg);
     int gen_count = 0;
 
     // Start profiler
@@ -148,12 +163,12 @@ int orion_cmd_infer(int argc, const char* argv[]) {
     bool prefill_ok;
     if (use_ane) {
         prefill_ok = orion_ane_prefill(w, prompt_tokens, prompt_len,
-                                        &kGPT2_124M, weights_path, kv, logits);
+                                        &cfg, weights_path, kv, logits);
         if (!prefill_ok) {
             fprintf(stderr, "Warning: ANE prefill failed, falling back to CPU\n");
             // Reset KV cache
             orion_kv_cache_free(kv);
-            kv = orion_kv_cache_create(&kGPT2_124M);
+            kv = orion_kv_cache_create(&cfg);
             orion_gpt2_prefill_kv(w, prompt_tokens, prompt_len, kv, logits);
             prefill_ok = true;
         }

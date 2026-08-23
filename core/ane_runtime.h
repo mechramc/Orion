@@ -3,17 +3,7 @@
 
 #import <Foundation/Foundation.h>
 #import <IOSurface/IOSurface.h>
-
-/// Model configuration shared across all Orion components.
-typedef struct {
-    int n_layer;
-    int n_head;
-    int d_model;
-    int head_dim;
-    int hidden_dim;
-    int vocab;
-    int max_seq;
-} OrionModelConfig;
+#include "model_config.h"
 
 /// Opaque handle to a compiled ANE program.
 typedef struct OrionProgram OrionProgram;
@@ -36,7 +26,7 @@ OrionProgram* orion_compile_mil(
 );
 
 /// Evaluate a compiled ANE program.
-/// @param prog        Compiled program handle
+/// @param prog        Compiled ANE program handle
 /// @param inputs      Array of input IOSurface tensors
 /// @param num_inputs  Number of inputs
 /// @param outputs     Array of output IOSurface tensors (pre-allocated)
@@ -54,6 +44,11 @@ void orion_release_program(OrionProgram* prog);
 /// Get the number of successful compilations this process has done.
 /// Useful for tracking approach to the ~119 compile limit.
 int orion_compile_count(void);
+
+/// Return the temp directory used by a compiled ANE program, or nil.
+/// The returned NSString is owned by the program and remains valid until
+/// orion_release_program() is called for that program.
+NSString* orion_program_tmp_dir(OrionProgram* prog);
 
 /// Create a new ANE program with patched weights, reusing compiled artifacts
 /// from a donor program. Skips compilation entirely — only loads.
@@ -89,6 +84,29 @@ OrionProgram* orion_program_patch_weights(
 bool orion_program_reload_weights(
     OrionProgram* prog,
     NSDictionary* weight_dict
+);
+
+/// Export a loaded program's compiled runtime artifacts to a persistent directory.
+/// The destination is replaced atomically enough for single-writer Silver cache usage.
+/// @param prog          Loaded OrionProgram
+/// @param artifact_dir  Persistent directory to populate
+/// @return true on success.
+bool orion_program_export_artifacts(
+    OrionProgram* prog,
+    const char* artifact_dir
+);
+
+/// Load an ANE program from previously exported runtime artifacts without compiling.
+/// @param mil_text       Same MIL text used for the original compile
+/// @param weight_dict    Same weight dict key structure used for the original compile
+/// @param artifact_dir   Directory containing exported runtime artifacts
+/// @param program_tag    Tag for debugging (may be NULL)
+/// @return Loaded program handle, or NULL on failure.
+OrionProgram* orion_program_load_artifacts(
+    const char* mil_text,
+    NSDictionary* weight_dict,
+    const char* artifact_dir,
+    const char* program_tag
 );
 
 #endif // ORION_ANE_RUNTIME_H

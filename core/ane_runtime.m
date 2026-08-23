@@ -2,6 +2,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <dlfcn.h>
+#import <unistd.h>
 
 // T015: orion_compile_mil — compile MIL text to ANE program
 // T016: orion_eval — evaluate a compiled program
@@ -218,6 +219,11 @@ int orion_compile_count(void) {
     return g_compile_count;
 }
 
+NSString* orion_program_tmp_dir(OrionProgram* prog) {
+    if (!prog || !prog->tmpDir) return nil;
+    return (__bridge NSString *)prog->tmpDir;
+}
+
 #pragma mark - T151: Delta weight patching
 
 OrionProgram* orion_program_patch_weights(
@@ -382,5 +388,125 @@ bool orion_program_reload_weights(
         }
         prog->loaded = true;
         return true;
+    }
+}
+
+static bool _orion_copy_item_if_exists(NSFileManager *fm, NSString *src, NSString *dst) {
+    if (![fm fileExistsAtPath:src]) return true;
+    [fm removeItemAtPath:dst error:nil];
+    NSString *parent = [dst stringByDeletingLastPathComponent];
+    [fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:nil];
+    NSError *err = nil;
+    return [fm copyItemAtPath:src toPath:dst error:&err];
+}
+
+bool orion_program_export_artifacts(
+    OrionProgram* prog,
+    const char* artifact_dir
+) {
+    if (!prog || !prog->tmpDir || !artifact_dir) return false;
+
+    @autoreleasepool {
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSString *srcDir = (__bridge NSString *)prog->tmpDir;
+        NSString *dstDir = [NSString stringWithUTF8String:artifact_dir];
+        NSString *stagingDir = [dstDir stringByAppendingFormat:@".tmp.%d", getpid()];
+
+        [fm removeItemAtPath:stagingDir error:nil];
+        [fm createDirectoryAtPath:stagingDir withIntermediateDirectories:YES attributes:nil error:nil];
+
+        bool ok = true;
+        ok = ok && _orion_copy_item_if_exists(fm,
+                                              [srcDir stringByAppendingPathComponent:@"data"],
+                                              [stagingDir stringByAppendingPathComponent:@"data"]);
+        ok = ok && _orion_copy_item_if_exists(fm,
+                                              [srcDir stringByAppendingPathComponent:@"net.plist"],
+                                              [stagingDir stringByAppendingPathComponent:@"net.plist"]);
+        ok = ok && _orion_copy_item_if_exists(fm,
+                                              [srcDir stringByAppendingPathComponent:@"model.mil"],
+                                              [stagingDir stringByAppendingPathComponent:@"model.mil"]);
+        ok = ok && _orion_copy_item_if_exists(fm,
+                                              [srcDir stringByAppendingPathComponent:@"weights"],
+                                              [stagingDir stringByAppendingPathComponent:@"weights"]);
+        if (!ok) {
+            [fm removeItemAtPath:stagingDir error:nil];
+            return false;
+        }
+
+        [fm removeItemAtPath:dstDir error:nil];
+        NSError *moveErr = nil;
+        if (![fm moveItemAtPath:stagingDir toPath:dstDir error:&moveErr]) {
+            [fm removeItemAtPath:stagingDir error:nil];
+            return false;
+        }
+        return true;
+    }
+}
+
+OrionProgram* orion_program_load_artifacts(
+    const char* mil_text,
+    NSDictionary* weight_dict,
+    const char* artifact_dir,
+    const char* program_tag
+) {
+    if (!g_init || !mil_text || !artifact_dir) return NULL;
+
+    @autoreleasepool {
+        NSString *artifactDir = [NSString stringWithUTF8String:artifact_dir];
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSString *artifactData = [artifactDir stringByAppendingPathComponent:@"data"];
+        NSString *artifactPlist = [artifactDir stringByAppendingPathComponent:@"net.plist"];
+        if (![fm fileExistsAtPath:artifactData] || ![fm fileExistsAtPath:artifactPlist]) {
+            return NULL;
+        }
+
+        NSData *milData = [NSData dataWithBytes:mil_text length:strlen(mil_text)];
+        NSDictionary *wdict = weight_dict ?: @{};
+
+        id desc = ((id(*)(Class,SEL,id,id,id))objc_msgSend)(
+            g_Desc, @selector(modelWithMILText:weights:optionsPlist:),
+            milData, wdict, nil);
+        if (!desc) return NULL;
+
+        id model = ((id(*)(Class,SEL,id))objc_msgSend)(
+            g_IMM, @selector(inMemoryModelWithDescriptor:), desc);
+        if (!model) return NULL;
+
+        id hexId = ((id(*)(id,SEL))objc_msgSend)(model, @selector(hexStringIdentifier));
+        NSString *modelDir = [NSTemporaryDirectory() stringByAppendingPathComponent:hexId];
+
+        [fm removeItemAtPath:modelDir error:nil];
+        [fm createDirectoryAtPath:modelDir withIntermediateDirectories:YES attributes:nil error:nil];
+
+        bool ok = true;
+        ok = ok && _orion_copy_item_if_exists(fm, artifactData, [modelDir stringByAppendingPathComponent:@"data"]);
+        ok = ok && _orion_copy_item_if_exists(fm, artifactPlist, [modelDir stringByAppendingPathComponent:@"net.plist"]);
+        ok = ok && _orion_copy_item_if_exists(fm,
+                                              [artifactDir stringByAppendingPathComponent:@"model.mil"],
+                                              [modelDir stringByAppendingPathComponent:@"model.mil"]);
+        ok = ok && _orion_copy_item_if_exists(fm,
+                                              [artifactDir stringByAppendingPathComponent:@"weights"],
+                                              [modelDir stringByAppendingPathComponent:@"weights"]);
+        if (!ok) {
+            [fm removeItemAtPath:modelDir error:nil];
+            return NULL;
+        }
+
+        NSError *e = nil;
+        BOOL loadOk = ((BOOL(*)(id,SEL,unsigned int,id,NSError**))objc_msgSend)(
+            model, @selector(loadWithQoS:options:error:), 21, @{}, &e);
+        if (!loadOk) {
+            [fm removeItemAtPath:modelDir error:nil];
+            return NULL;
+        }
+
+        OrionProgram *prog = (OrionProgram *)calloc(1, sizeof(OrionProgram));
+        prog->model = (void *)CFBridgingRetain(model);
+        prog->tmpDir = (void *)CFBridgingRetain(modelDir);
+        prog->loaded = true;
+        if (program_tag) {
+            strlcpy(prog->tag, program_tag, sizeof(prog->tag));
+        }
+        return prog;
     }
 }
