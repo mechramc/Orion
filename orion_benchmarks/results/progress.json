@@ -1,0 +1,14 @@
+{
+  "burst_llama-3.2-3b_mlx_AC": "skipped: power mismatch",
+  "burst_phi-3-mini_mlx_AC": "skipped: power mismatch",
+  "burst_gpt2-124m_orion_AC": "skipped: power mismatch",
+  "sustained_llama-3.2-3b_mlx_AC": "skipped: power mismatch",
+  "sustained_phi-3-mini_mlx_AC": "skipped: power mismatch",
+  "sustained_gpt2-124m_orion_AC": "skipped: power mismatch",
+  "burst_llama-3.2-3b_mlx_Battery": "done",
+  "burst_phi-3-mini_mlx_Battery": "done",
+  "burst_gpt2-124m_orion_Battery": "done",
+  "sustained_llama-3.2-3b_mlx_Battery": "done",
+  "sustained_phi-3-mini_mlx_Battery": "done",
+  "sustained_gpt2-124m_orion_Battery": "done"
+}

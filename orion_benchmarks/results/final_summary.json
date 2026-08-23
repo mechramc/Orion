@@ -1,0 +1,27 @@
+{
+  "environment": {
+    "timestamp": "2026-08-03T18:39:09.406807",
+    "power_source": "Battery",
+    "wifi_off": false,
+    "loadavg": 1.3447265625,
+    "memory_pressure": "System-wide memory free percentage: 84%",
+    "mlx_version": "0.29.1",
+    "llamacpp_path": "/usr/local/bin/llama-cli",
+    "orion_path": "/Users/virajshah/Desktop/other/ai/orion-repo/Orion/orion"
+  },
+  "progress": {
+    "burst_llama-3.2-3b_mlx_AC": "skipped: power mismatch",
+    "burst_phi-3-mini_mlx_AC": "skipped: power mismatch",
+    "burst_gpt2-124m_orion_AC": "skipped: power mismatch",
+    "sustained_llama-3.2-3b_mlx_AC": "skipped: power mismatch",
+    "sustained_phi-3-mini_mlx_AC": "skipped: power mismatch",
+    "sustained_gpt2-124m_orion_AC": "skipped: power mismatch",
+    "burst_llama-3.2-3b_mlx_Battery": "done",
+    "burst_phi-3-mini_mlx_Battery": "done",
+    "burst_gpt2-124m_orion_Battery": "done",
+    "sustained_llama-3.2-3b_mlx_Battery": "done",
+    "sustained_phi-3-mini_mlx_Battery": "done",
+    "sustained_gpt2-124m_orion_Battery": "done"
+  },
+  "generated_at": "2026-08-03T19:05:59.818715"
+}
