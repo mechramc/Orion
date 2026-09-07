@@ -21,14 +21,33 @@ No CoreML. No Metal. No GPU. No cloud.
 # Build (no Xcode required)
 make
 
+# Fetch weights — model/blobs/ ships empty, this step is required
+pip install -r requirements.txt
+
+# GPT-2 124M (inference) — downloads from HuggingFace itself
+python model/convert/hf_to_blobs_gpt2.py --output model/blobs/gpt2_124m/
+
+# Stories110M (training) — the checkpoint is NOT auto-downloaded, fetch it first
+curl -L --fail -o model/weights/stories110M.bin \
+  https://huggingface.co/karpathy/tinyllamas/resolve/main/stories110M.bin
+python model/convert/hf_to_blobs_llama.py \
+  --checkpoint model/weights/stories110M.bin \
+  --output model/blobs/stories110m/
+
 # Run inference
 ./orion infer --prompt "The meaning of life is" --max_tokens 128 --ane
 
-# Train a model
-./orion train --weights model/blobs/stories110m --dataset data/tinystories.bin --steps 1000
+# Fetch and tokenize training data (~10MB, 5.07M tokens)
+bash scripts/download_data.sh
+
+# Train a model — on a COPY: training rewrites the weight blobs in place
+cp -R model/blobs/stories110m model/blobs/stories110m_train
+./orion train --weights model/blobs/stories110m_train --dataset data/tinystories_data00.bin --steps 1000
 ```
 
-Everything runs offline. No data leaves your device.
+Everything runs offline once weights and data are fetched. No data leaves your device at
+inference or training time — the Python converters are used once, up front, and are never in the
+runtime path. See [model/weights/download.md](model/weights/download.md) for weight sources.
 
 ---
 
@@ -79,13 +98,13 @@ Orion builds on foundational work by [maderix](https://github.com/maderix/ANE) (
 
 ```bash
 # Train with delta compilation (no exec() restart needed)
-./orion train --weights model/blobs/stories110m \
-  --dataset data/tinystories.bin \
+./orion train --weights model/blobs/stories110m_train \
+  --dataset data/tinystories_data00.bin \
   --steps 1000 --grad_accum 4 --lr 3e-4
 
 # Resume from checkpoint
-./orion train --weights model/blobs/stories110m \
-  --dataset data/tinystories.bin \
+./orion train --weights model/blobs/stories110m_train \
+  --dataset data/tinystories_data00.bin \
   --steps 100 --grad_accum 4 --lr 1e-5 \
   --resume checkpoints/ckpt_00500.bin
 ```
