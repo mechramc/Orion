@@ -35,6 +35,26 @@ OrionProgram* orion_compile_mil(
     const char* program_tag
 );
 
+/// Compile MIL text after merging all BLOBFILE weights into one storage file.
+///
+/// macOS 27's ANECompilerService rejects some bundles containing multiple
+/// BLOBFILE files with "verifyBundleAtPath: invalid model". This variant packs
+/// every weight into a single Core ML storage-v2 file and rewrites the MIL
+/// BLOBFILE references. Use for inference programs that are compiled once;
+/// training programs that use delta weight reload should keep using
+/// orion_compile_mil().
+///
+/// @param mil_text       MIL program source text (null-terminated)
+/// @param weight_dict    NSDictionary mapping BLOBFILE paths to @{@"offset":@N, @"data":NSData*},
+///                       or nil/@{} for weight-free programs.
+/// @param program_tag    Human-readable tag for debugging (may be NULL)
+/// @return Compiled program handle, or NULL on failure.
+OrionProgram* orion_compile_mil_merged(
+    const char* mil_text,
+    NSDictionary* weight_dict,
+    const char* program_tag
+);
+
 /// Evaluate a compiled ANE program.
 /// @param prog        Compiled program handle
 /// @param inputs      Array of input IOSurface tensors

@@ -22,7 +22,9 @@ OrionProgram* orion_kernel_compile(const OrionKernel* kernel,
 
     char tag[64];
     snprintf(tag, sizeof(tag), "%s_L%d", kernel->name, layer_idx);
-    prog = orion_compile_mil(mil.UTF8String, wdict, tag);
+    // Inference kernels are compiled once and never weight-reloaded, so they
+    // can use the single-file weight layout required by macOS 27.
+    prog = orion_compile_mil_merged(mil.UTF8String, wdict, tag);
     if (!prog) {
         fprintf(stderr, "orion_kernel_compile: compile failed for %s L%d\n",
                 kernel->name, layer_idx);

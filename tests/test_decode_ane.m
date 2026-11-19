@@ -206,7 +206,7 @@ static void test_decode_proj_compile_eval(void) {
     NSDictionary *wdict = make_proj_weights(0, d);
 
     double t0 = time_ms();
-    OrionProgram *prog = orion_compile_mil(mil.UTF8String, wdict, "decode_proj_L0");
+    OrionProgram *prog = orion_compile_mil_merged(mil.UTF8String, wdict, "decode_proj_L0");
     double t1 = time_ms();
     ASSERT(prog != NULL, "decode_proj should compile");
     printf("  compile time: %.1f ms\n", t1 - t0);
@@ -272,7 +272,7 @@ static void test_decode_ffn_compile_eval(void) {
     NSDictionary *wdict = make_ffn_weights(0, d, h);
 
     double t0 = time_ms();
-    OrionProgram *prog = orion_compile_mil(mil.UTF8String, wdict, "decode_ffn_L0");
+    OrionProgram *prog = orion_compile_mil_merged(mil.UTF8String, wdict, "decode_ffn_L0");
     double t1 = time_ms();
     ASSERT(prog != NULL, "decode_ffn should compile");
     printf("  compile time: %.1f ms\n", t1 - t0);
@@ -337,7 +337,7 @@ static void test_decode_proj_multiple_layers(void) {
         ASSERT(has_path, "should reference correct blob path for layer");
 
         NSDictionary *wdict = make_proj_weights(l, d);
-        OrionProgram *prog = orion_compile_mil(mil.UTF8String, wdict, "multi_layer_proj");
+        OrionProgram *prog = orion_compile_mil_merged(mil.UTF8String, wdict, "multi_layer_proj");
         ASSERT(prog != NULL, "layer should compile");
         orion_release_program(prog);
     }
@@ -362,7 +362,7 @@ static void test_decode_ffn_multiple_layers(void) {
         ASSERT(has_path, "should reference correct blob path for layer");
 
         NSDictionary *wdict = make_ffn_weights(l, d, h);
-        OrionProgram *prog = orion_compile_mil(mil.UTF8String, wdict, "multi_layer_ffn");
+        OrionProgram *prog = orion_compile_mil_merged(mil.UTF8String, wdict, "multi_layer_ffn");
         ASSERT(prog != NULL, "layer should compile");
         orion_release_program(prog);
     }
@@ -382,12 +382,12 @@ static void test_decode_perf(void) {
 
     NSString *proj_mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_gpt2_decode_proj,0, &cfg);
     NSDictionary *proj_wdict = make_proj_weights(0, d);
-    OrionProgram *proj_prog = orion_compile_mil(proj_mil.UTF8String, proj_wdict, "perf_proj");
+    OrionProgram *proj_prog = orion_compile_mil_merged(proj_mil.UTF8String, proj_wdict, "perf_proj");
     ASSERT(proj_prog != NULL, "proj should compile");
 
     NSString *ffn_mil = orion_kernel_adapter_generate_mil_2arg(orion_frontend_gpt2_decode_ffn,0, &cfg);
     NSDictionary *ffn_wdict = make_ffn_weights(0, d, h);
-    OrionProgram *ffn_prog = orion_compile_mil(ffn_mil.UTF8String, ffn_wdict, "perf_ffn");
+    OrionProgram *ffn_prog = orion_compile_mil_merged(ffn_mil.UTF8String, ffn_wdict, "perf_ffn");
     ASSERT(ffn_prog != NULL, "ffn should compile");
 
     IOSurfaceRef ioX = make_decode_input(d, seq, 0.5f);

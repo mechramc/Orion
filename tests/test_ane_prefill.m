@@ -171,7 +171,7 @@ static void test_attn_prefill(void) {
     CHECK(wdict.count == 11, "weight dict has 11 entries (10 weights + mask)");
 
     // Compile
-    OrionProgram *prog = orion_compile_mil(mil.UTF8String, wdict, "test_attn_L0");
+    OrionProgram *prog = orion_compile_mil_merged(mil.UTF8String, wdict, "test_attn_L0");
     CHECK(prog != NULL, "attention L0 compiles on ANE");
 
     if (prog) {
@@ -242,7 +242,7 @@ static void test_ffn_prefill(void) {
     CHECK(wdict.count == 6, "FFN weight dict has 6 entries");
 
     // Compile
-    OrionProgram *prog = orion_compile_mil(mil.UTF8String, wdict, "test_ffn_L0");
+    OrionProgram *prog = orion_compile_mil_merged(mil.UTF8String, wdict, "test_ffn_L0");
     CHECK(prog != NULL, "FFN L0 compiles on ANE");
 
     if (prog) {
@@ -295,8 +295,8 @@ static void test_combined_layer(void) {
     NSString *attn_mil = orion_kernel_adapter_generate_mil(orion_frontend_gpt2_prefill_attn, 0, seq, &kGPT2_124M);
     NSString *ffn_mil  = orion_kernel_adapter_generate_mil(orion_frontend_gpt2_prefill_ffn, 0, seq, &kGPT2_124M);
 
-    OrionProgram *attn_prog = orion_compile_mil(attn_mil.UTF8String, attn_dict, "comb_attn_L0");
-    OrionProgram *ffn_prog  = orion_compile_mil(ffn_mil.UTF8String, ffn_dict, "comb_ffn_L0");
+    OrionProgram *attn_prog = orion_compile_mil_merged(attn_mil.UTF8String, attn_dict, "comb_attn_L0");
+    OrionProgram *ffn_prog  = orion_compile_mil_merged(ffn_mil.UTF8String, ffn_dict, "comb_ffn_L0");
 
     CHECK(attn_prog && ffn_prog, "both L0 programs compile");
 
@@ -388,7 +388,7 @@ static void test_ane_vs_cpu(void) {
     // Compile and run attention on ANE
     NSMutableDictionary *wdict = build_attn_weight_dict(0, seq, "model/blobs/gpt2_124m");
     NSString *mil = orion_kernel_adapter_generate_mil(orion_frontend_gpt2_prefill_attn, 0, seq, &kGPT2_124M);
-    OrionProgram *prog = orion_compile_mil(mil.UTF8String, wdict, "cmp_attn_L0");
+    OrionProgram *prog = orion_compile_mil_merged(mil.UTF8String, wdict, "cmp_attn_L0");
 
     if (prog) {
         IOSurfaceRef ioIn     = make_f32_surface_data(ane_input, count);
