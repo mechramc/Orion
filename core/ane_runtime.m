@@ -25,6 +25,109 @@ struct OrionProgram {
     bool loaded;
 };
 
+
+#pragma mark - BLOBFILE merge (macOS 27 workaround)
+
+// macOS 27's ANECompilerService rejects program bundles containing more than
+// one BLOBFILE weight file. Merge them into one Core ML storage-v2 style file
+// and rewrite every BLOBFILE(path, offset) reference in the MIL text.
+//
+// Layout: 64-byte file header, then for each tensor a 64-byte metadata block
+// followed immediately by its 64-byte-aligned payload. The MIL offset points
+// at that tensor's metadata block.
+
+static void orion_put_u32le(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)(v & 0xff);
+    p[1] = (uint8_t)((v >> 8) & 0xff);
+    p[2] = (uint8_t)((v >> 16) & 0xff);
+    p[3] = (uint8_t)((v >> 24) & 0xff);
+}
+
+static NSDictionary* orion_merge_weight_dict(NSString* mil,
+                                             NSDictionary* wdict,
+                                             NSString** out_mil) {
+    *out_mil = mil;
+    if (wdict.count < 2) return wdict;
+
+    NSArray<NSString*> *keys = [[wdict allKeys] sortedArrayUsingSelector:@selector(compare:)];
+    NSMutableData *merged = [NSMutableData data];
+    uint8_t fileHeader[64] = {0};
+
+    // Reuse the first blob's 64-byte file header for correct magic/version.
+    for (NSString *key in keys) {
+        NSData *blob = wdict[key][@"data"];
+        if ([blob isKindOfClass:[NSData class]] && blob.length >= 128) {
+            [blob getBytes:fileHeader range:NSMakeRange(0, 64)];
+            break;
+        }
+    }
+    // Core ML storage v2 file header: entry count at +0, version 2 at +4.
+    orion_put_u32le(fileHeader + 0, (uint32_t)keys.count);
+    orion_put_u32le(fileHeader + 4, 2);
+    [merged appendBytes:fileHeader length:sizeof(fileHeader)];
+
+    NSMutableDictionary<NSString*, NSNumber*> *offsets = [NSMutableDictionary dictionary];
+    for (NSString *key in keys) {
+        NSData *blob = wdict[key][@"data"];
+        if (![blob isKindOfClass:[NSData class]] || blob.length < 128) {
+            // Not a BLOBFILE; leave the dictionary untouched and let the
+            // normal path report the error.
+            *out_mil = mil;
+            return wdict;
+        }
+
+        uint8_t meta[64];
+        [blob getBytes:meta range:NSMakeRange(64, 64)];
+        // Sanity check the per-chunk magic 0xDEADBEEF at +64.
+        if (!(meta[0] == 0xEF && meta[1] == 0xBE && meta[2] == 0xAD && meta[3] == 0xDE)) {
+            *out_mil = mil;
+            return wdict;
+        }
+
+        NSUInteger chunkOffset = merged.length;
+        uint32_t dataSize = (uint32_t)(blob.length - 128);
+        // Per-chunk metadata: uint64 size at +8, uint64 data offset at +16.
+        orion_put_u32le(meta + 8, dataSize);
+        orion_put_u32le(meta + 12, 0);
+        orion_put_u32le(meta + 16, (uint32_t)(chunkOffset + 64));
+        orion_put_u32le(meta + 20, 0);
+
+        [merged appendBytes:meta length:sizeof(meta)];
+        [merged appendData:[blob subdataWithRange:NSMakeRange(128, dataSize)]];
+        while ((merged.length & 63) != 0) {
+            uint8_t zero = 0;
+            [merged appendBytes:&zero length:1];
+        }
+        offsets[key] = @(chunkOffset);
+    }
+
+    NSString *mergedPath = @"@model_path/weights/merged.bin";
+    NSMutableString *newMil = [mil mutableCopy];
+    NSError *regexErr = nil;
+    NSRegularExpression *re = [NSRegularExpression
+        regularExpressionWithPattern:@"BLOBFILE\\(path=string\\(\"([^\"]+)\"\\), offset=uint64\\(([0-9]+)\\)\\)"
+                             options:0 error:&regexErr];
+    if (!re) {
+        *out_mil = mil;
+        return wdict;
+    }
+
+    NSArray<NSTextCheckingResult*> *matches =
+        [re matchesInString:newMil options:0 range:NSMakeRange(0, newMil.length)];
+    for (NSTextCheckingResult *m in [matches reverseObjectEnumerator]) {
+        NSString *oldPath = [newMil substringWithRange:[m rangeAtIndex:1]];
+        NSNumber *off = offsets[oldPath];
+        if (!off) continue;
+        NSString *replacement = [NSString stringWithFormat:
+            @"BLOBFILE(path=string(\"%@\"), offset=uint64(%lu))",
+            mergedPath, (unsigned long)off.unsignedLongValue];
+        [newMil replaceCharactersInRange:m.range withString:replacement];
+    }
+
+    *out_mil = newMil;
+    return @{mergedPath: @{@"offset": @0, @"data": merged}};
+}
+
 #pragma mark - Init
 
 bool orion_ane_init(void) {
@@ -48,16 +151,22 @@ bool orion_ane_init(void) {
 
 #pragma mark - T015: Compile
 
-OrionProgram* orion_compile_mil(
+static OrionProgram* orion_compile_mil_internal(
     const char* mil_text,
     NSDictionary* weight_dict,
-    const char* program_tag
+    const char* program_tag,
+    bool merge_blobs
 ) {
     if (!g_init || !mil_text) return NULL;
 
     @autoreleasepool {
-        NSData *milData = [NSData dataWithBytes:mil_text length:strlen(mil_text)];
+        NSString *milString = @(mil_text);
         NSDictionary *wdict = weight_dict ?: @{};
+        NSString *effectiveMil = milString;
+        if (merge_blobs) {
+            wdict = orion_merge_weight_dict(milString, wdict, &effectiveMil);
+        }
+        NSData *milData = [effectiveMil dataUsingEncoding:NSUTF8StringEncoding];
 
         // Step 1: Create descriptor
         id desc = ((id(*)(Class,SEL,id,id,id))objc_msgSend)(
@@ -125,6 +234,22 @@ OrionProgram* orion_compile_mil(
 
         return prog;
     }
+}
+
+OrionProgram* orion_compile_mil(
+    const char* mil_text,
+    NSDictionary* weight_dict,
+    const char* program_tag
+) {
+    return orion_compile_mil_internal(mil_text, weight_dict, program_tag, false);
+}
+
+OrionProgram* orion_compile_mil_merged(
+    const char* mil_text,
+    NSDictionary* weight_dict,
+    const char* program_tag
+) {
+    return orion_compile_mil_internal(mil_text, weight_dict, program_tag, true);
 }
 
 #pragma mark - T016: Eval

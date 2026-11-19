@@ -112,7 +112,8 @@ TEST_NAMES = \
 	test_infer_golden_ane \
 	test_bench_decode \
 	test_delta_compile \
-	test_lora
+	test_lora \
+	test_weight_merge
 
 # Compiler tests (link with compiler objects, not full library)
 COMPILER_TEST_NAMES = \
